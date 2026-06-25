@@ -53,3 +53,4 @@ class VideoMeta(BaseModel):
     duration_s: float
     transcript: str                                # с таймкодами [MM:SS]
     heatmap: list[tuple[float, float]] = []        # (sec, intensity 0..1)
+    word_timings: list[tuple[float, str]] = []     # (sec, слово) — для привязки таймкодов

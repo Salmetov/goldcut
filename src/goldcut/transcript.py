@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import difflib
 import html
 import json
 import re
@@ -13,6 +14,16 @@ from pathlib import Path
 
 _TS = re.compile(r"(\d+):(\d+):(\d+)\.(\d+)\s+-->")
 _TAG = re.compile(r"<[^>]+>")
+_WORDTS = re.compile(r"<(\d+):(\d+):(\d+)\.(\d+)>")
+_NONWORD = re.compile(r"[^a-z0-9]+")
+
+
+def _to_s(h: str, m: str, s: str, ms: str) -> float:
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+
+def _norm(word: str) -> str:
+    return _NONWORD.sub("", word.lower())
 
 
 def mmss(t: float) -> str:
@@ -64,3 +75,68 @@ def heatmap_peaks(
     heatmap: list[tuple[float, float]], top: int = 15
 ) -> list[tuple[float, float]]:
     return sorted(heatmap, key=lambda x: x[1], reverse=True)[:top]
+
+
+def parse_vtt_words(path: str | Path) -> list[tuple[float, str]]:
+    """Пословный поток (секунды, слово) из таймкодов авто-сабов YouTube.
+
+    Берём только строки с пословными тегами <ts>; первое слово до первого тега
+    получает время реплики, остальные — свой <ts>. Не-таймкодированные строки
+    (дубли «прокрутки») пропускаются → естественный дедуп.
+    """
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    words: list[tuple[float, str]] = []
+    cue_start: float | None = None
+    for line in lines:
+        m = _TS.match(line)
+        if m:
+            cue_start = _to_s(*m.groups())
+            continue
+        if "-->" in line or "<" not in line:
+            continue
+        first = _WORDTS.search(line)
+        if not first:
+            continue
+        if cue_start is not None:
+            lead = html.unescape(line[: first.start()].replace("<c>", "").replace("</c>", ""))
+            for w in lead.split():
+                words.append((cue_start, w))
+        for mt in re.finditer(
+            r"<(\d+):(\d+):(\d+)\.(\d+)>(.*?)(?=<\d+:\d+:\d+\.\d+>|$)", line
+        ):
+            ts = _to_s(*mt.group(1, 2, 3, 4))
+            seg = html.unescape(mt.group(5).replace("<c>", "").replace("</c>", ""))
+            for w in seg.split():
+                words.append((ts, w))
+    return words
+
+
+def snap_timecodes(
+    words: list[tuple[float, str]],
+    clip_text: str,
+    pad_end: float = 0.4,
+) -> tuple[float, float] | None:
+    """Выровнять текст клипа по пословному потоку → точные (start_s, end_s).
+
+    Якоримся на САМОМ длинном совпадающем блоке (он попадает в нужный регион) и
+    проецируем границы клипа от него — так короткие ложные совпадения вроде
+    «if there was a» в начале ролика не растягивают клип. Возвращает None при
+    слабом/отсутствующем выравнивании.
+    """
+    timed = [(t, _norm(w)) for t, w in words]
+    timed = [(t, n) for t, n in timed if n]
+    if not timed:
+        return None
+    seq = [n for _, n in timed]
+    clip = [n for n in (_norm(w) for w in clip_text.split()) if n]
+    if not clip:
+        return None
+
+    sm = difflib.SequenceMatcher(None, seq, clip, autojunk=False)
+    lm = sm.find_longest_match(0, len(seq), 0, len(clip))
+    if lm.size < 4:                                   # нет уверенного якоря
+        return None
+
+    start_idx = max(0, lm.a - lm.b)                   # проекция: clip[0] ≈ здесь
+    end_idx = min(len(timed) - 1, start_idx + len(clip) - 1)
+    return timed[start_idx][0], timed[end_idx][0] + pad_end

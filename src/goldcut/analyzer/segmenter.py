@@ -12,7 +12,7 @@ import anthropic
 
 from goldcut.config import Config
 from goldcut.models import Segment, SegmentSelection, VideoMeta
-from goldcut.transcript import heatmap_peaks, mmss
+from goldcut.transcript import heatmap_peaks, mmss, snap_timecodes
 
 # Веса рубрики для итогового балла. Тюнятся по результатам прогонов.
 WEIGHTS = {
@@ -25,6 +25,10 @@ WEIGHTS = {
 
 # Во сколько раз пик heatmap (0..1) добавляется к итоговому баллу.
 HEATMAP_SCALE = 0.5
+
+# Привязанный клип принимается, только если длительность в этих пределах (сек);
+# иначе выравнивание считаем неудачным и оставляем таймкоды от LLM.
+SNAP_MIN_S, SNAP_MAX_S = 8.0, 120.0
 
 SYSTEM = """\
 Ты — редактор коротких вертикальных видео (TikTok/Shorts). Тебе дают транскрипт \
@@ -79,6 +83,16 @@ def _total(scores, heatmap_boost: float) -> float:
     return round(sum(WEIGHTS[k] * getattr(scores, k) for k in WEIGHTS) + heatmap_boost, 3)
 
 
+def _snap(draft, word_timings) -> tuple[float, float]:
+    """Точные (start_s, end_s) по пословному VTT; при неудаче — таймкоды LLM."""
+    if not word_timings:
+        return draft.start_s, draft.end_s
+    snapped = snap_timecodes(word_timings, draft.transcript)
+    if snapped and SNAP_MIN_S <= (snapped[1] - snapped[0]) <= SNAP_MAX_S:
+        return round(snapped[0], 2), round(snapped[1], 2)
+    return draft.start_s, draft.end_s
+
+
 def segment(
     meta: VideoMeta,
     top_k: int = 10,
@@ -102,9 +116,10 @@ def segment(
 
     scored: list[Segment] = []
     for d in selection.segments:
-        boost = _heatmap_boost(d.start_s, d.end_s, meta.heatmap)
-        scored.append(
-            Segment(**d.model_dump(), heatmap_boost=boost, total=_total(d.scores, boost))
-        )
+        start_s, end_s = _snap(d, meta.word_timings)   # точные таймкоды по пословному VTT
+        boost = _heatmap_boost(start_s, end_s, meta.heatmap)
+        data = d.model_dump()
+        data["start_s"], data["end_s"] = start_s, end_s
+        scored.append(Segment(**data, heatmap_boost=boost, total=_total(d.scores, boost)))
     scored.sort(key=lambda s: s.total, reverse=True)
     return scored[:top_k]
