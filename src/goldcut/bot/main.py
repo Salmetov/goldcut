@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+import time
 from pathlib import Path
 
 from telegram import Update
@@ -42,6 +44,23 @@ NUMBERS_RE = re.compile(r"^[\d\s,]+$")
 CFG = Config.from_env("/root/goldcut/.env")
 FETCHER = TailscaleFetcher(CFG.fetcher_base_url, cache_dir="/root/goldcut/cache")
 CLIPS_DIR = Path("/root/goldcut/clips")
+LOGS_DIR = Path("/root/goldcut/logs")
+
+
+def _log_segments(url: str, title: str, segs) -> None:
+    """JSON-лог каждого анализа — для отладки границ/качества клипов."""
+    LOGS_DIR.mkdir(exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    path = LOGS_DIR / f"segments-{stamp}.json"
+    path.write_text(
+        json.dumps(
+            {"url": url, "title": title, "segments": [s.model_dump() for s in segs]},
+            ensure_ascii=False,
+            indent=1,
+        ),
+        encoding="utf-8",
+    )
+    log.info("segments logged: %s", path)
 
 
 async def cmd_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
@@ -69,11 +88,16 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await chat.send_action(ChatAction.TYPING)
     try:
         meta = await asyncio.to_thread(FETCHER.meta, url)
+        await update.message.reply_text(
+            f"📄 Транскрипт получен ({mmss(meta.duration_s)} видео). Claude ищет золото (~1 мин)…"
+        )
+        await chat.send_action(ChatAction.TYPING)
         segs = await asyncio.to_thread(segment, meta, CFG.top_k)
     except Exception as exc:
         log.exception("analyze failed")
         await update.message.reply_text(f"❌ Не получилось: {exc}")
         return
+    _log_segments(url, meta.title, segs)
     context.user_data["pending"] = {"url": url, "meta": meta, "segs": segs}
     await update.message.reply_text(_format_candidates(segs))
 

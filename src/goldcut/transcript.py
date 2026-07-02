@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import bisect
 import difflib
 import html
 import json
@@ -150,3 +151,51 @@ def snap_timecodes(
     start_idx = max(0, lm.a - lm.b)                   # проекция: clip[0] ≈ здесь
     end_idx = min(len(timed) - 1, start_idx + len(clip) - 1)
     return timed[start_idx][0], timed[end_idx][0] + pad_end
+
+
+_SENT_END = re.compile(r"[.!?…][\"')\]]*$")
+
+
+def extend_to_sentence_bounds(
+    words: list[tuple[float, str]],
+    start_s: float,
+    end_s: float,
+    *,
+    max_back_s: float = 8.0,
+    max_fwd_s: float = 5.0,
+    pause_s: float = 1.2,
+    pad_end: float = 0.4,
+) -> tuple[float, float]:
+    """Расширить [start_s, end_s] до границ предложений — чтобы мысль была целой.
+
+    LLM/привязка могут дать клип, начинающийся с середины фразы (например, из-за
+    разбиения транскрипта на ~20с-абзацы). Идём назад от начала клипа, пока
+    предыдущее слово не завершает предложение (пунктуация `.?!` в авто-сабах) или
+    не встретилась пауза в речи > pause_s; аналогично вперёд до конца предложения.
+    Расширение ограничено max_back_s / max_fwd_s.
+    """
+    if not words:
+        return start_s, end_s
+    times = [t for t, _ in words]
+
+    i = min(bisect.bisect_left(times, start_s), len(words) - 1)
+    while i > 0:
+        prev_t, prev_w = words[i - 1]
+        if _SENT_END.search(prev_w):          # предыдущее слово закончило предложение
+            break
+        if start_s - prev_t > max_back_s:     # не уходим слишком далеко назад
+            break
+        if words[i][0] - prev_t > pause_s:    # пауза в речи ≈ граница мысли
+            break
+        i -= 1
+
+    j = max(bisect.bisect_right(times, end_s) - 1, 0)
+    while j < len(words) - 1:
+        if _SENT_END.search(words[j][1]):     # текущее слово завершает предложение
+            break
+        next_t = words[j + 1][0]
+        if next_t - end_s > max_fwd_s or next_t - words[j][0] > pause_s:
+            break
+        j += 1
+
+    return words[i][0], words[j][0] + pad_end

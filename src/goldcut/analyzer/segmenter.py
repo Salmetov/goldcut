@@ -12,7 +12,12 @@ import anthropic
 
 from goldcut.config import Config
 from goldcut.models import Segment, SegmentSelection, VideoMeta
-from goldcut.transcript import heatmap_peaks, mmss, snap_timecodes
+from goldcut.transcript import (
+    extend_to_sentence_bounds,
+    heatmap_peaks,
+    mmss,
+    snap_timecodes,
+)
 
 # Веса рубрики для итогового балла. Тюнятся по результатам прогонов.
 WEIGHTS = {
@@ -41,6 +46,9 @@ SYSTEM = """\
 - Бери куски 15–60 секунд. Большая часть ролика НЕ должна дать ничего — это нормально.
 - Границы — по предложениям: клип начинается с сильной фразы (хук в первые ~2 сек) и \
 заканчивается развязкой, не обрываясь на полуслове.
+- Поле transcript должен содержать ПОЛНУЮ мысль: начинаться с начала предложения и \
+заканчиваться его концом. Метки [MM:SS] — просто ориентиры, текст между ними непрерывен; \
+если предложение начинается до метки — включи его начало из предыдущего абзаца.
 - Каждый кусок должен быть понятен сам по себе. Если для смысла нужен контекст до/после — пропускай.
 - ИГНОРИРУЙ И НЕ ВКЛЮЧАЙ: рекламные вставки и спонсорские чтения, само-промо канала \
 («подпишись», «лайк», промокоды, ссылки), организационные подводки, повторы, оффтоп, болтовню.
@@ -84,13 +92,20 @@ def _total(scores, heatmap_boost: float) -> float:
 
 
 def _snap(draft, word_timings) -> tuple[float, float]:
-    """Точные (start_s, end_s) по пословному VTT; при неудаче — таймкоды LLM."""
+    """Точные (start_s, end_s): привязка по пословному VTT + расширение до предложений.
+
+    Расширение гарантирует целостность мысли: клип не начнётся/оборвётся посреди
+    фразы, даже если LLM скопировал текст с границы 20с-абзаца транскрипта.
+    """
     if not word_timings:
         return draft.start_s, draft.end_s
     snapped = snap_timecodes(word_timings, draft.transcript)
     if snapped and SNAP_MIN_S <= (snapped[1] - snapped[0]) <= SNAP_MAX_S:
-        return round(snapped[0], 2), round(snapped[1], 2)
-    return draft.start_s, draft.end_s
+        start, end = snapped
+    else:
+        start, end = draft.start_s, draft.end_s
+    start, end = extend_to_sentence_bounds(word_timings, start, end)
+    return round(start, 2), round(end, 2)
 
 
 def segment(

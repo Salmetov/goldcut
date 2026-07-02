@@ -26,3 +26,4 @@ media/
 # Кэш видео и готовые клипы
 cache/
 clips/
+logs/
