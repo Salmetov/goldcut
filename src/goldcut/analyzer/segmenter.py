@@ -1,23 +1,31 @@
 """Analyzer — сердце системы: отбор «золота» из транскрипта.
 
-Реализует метод из docs/analyzer-method.md. Две задачи, намеренно НЕ слитые:
-  1. Сегментация — LLM находит границы самодостаточных мыслей (по смыслу).
-  2. Скоринг — код считает взвешенный балл + heatmap-буст и берёт top-K.
-LLM ставит оценки по рубрике; веса и heatmap-математика живут в коде (прозрачно/тюнится).
+Реализует метод из docs/analyzer-method.md. Ключевой принцип: LLM ВЫБИРАЕТ,
+а не генерирует. Код строит из пословных таймкодов пронумерованные предложения
+с точным временем; LLM возвращает клип как диапазон предложений (S412–S418).
+Таймкоды и дословный текст берутся из диапазона — привязка текста, снапинг и
+починка границ не нужны по построению. Скоринг (веса, heatmap-буст) — в коде.
 """
 
 from __future__ import annotations
 
+import logging
+
 import anthropic
+
+import re
 
 from goldcut.config import Config
 from goldcut.models import Segment, SegmentSelection, VideoMeta
-from goldcut.transcript import (
-    extend_to_sentence_bounds,
-    heatmap_peaks,
-    mmss,
-    snap_timecodes,
-)
+from goldcut.transcript import build_sentences, heatmap_peaks, mmss
+
+log = logging.getLogger(__name__)
+
+_ENDS_CLEAN = re.compile(r"[.!?…][\"')\]]*$")
+
+# Насколько можно авто-дотянуть конец диапазона до конца фразы
+MAX_TAIL_EXTEND_SENTENCES = 2
+MAX_TAIL_EXTEND_S = 6.0
 
 # Веса рубрики для итогового балла. Тюнятся по результатам прогонов.
 WEIGHTS = {
@@ -31,53 +39,60 @@ WEIGHTS = {
 # Во сколько раз пик heatmap (0..1) добавляется к итоговому баллу.
 HEATMAP_SCALE = 0.5
 
-# Привязанный клип принимается, только если длительность в этих пределах (сек);
-# иначе выравнивание считаем неудачным и оставляем таймкоды от LLM.
-SNAP_MIN_S, SNAP_MAX_S = 8.0, 120.0
+# Допустимая длительность клипа (сек); вне пределов — кандидат отбрасывается.
+MIN_CLIP_S, MAX_CLIP_S = 10.0, 90.0
 
 SYSTEM = """\
 Ты — редактор коротких вертикальных видео (TikTok/Shorts). Тебе дают транскрипт \
-длинного ролика с таймкодами [MM:SS]. Твоя задача — НЕ нарезать его подряд, а \
-ВЫУДИТЬ ЗОЛОТО: найти отдельные самодостаточные моменты, где спикер проговаривает \
-одну ясную, неочевидную или эмоционально цепляющую мысль, которая работает как клип \
-сама по себе, без контекста остального ролика.
+длинного ролика, разбитый на ПРОНУМЕРОВАННЫЕ ПРЕДЛОЖЕНИЯ вида «S123 [MM:SS] текст». \
+Твоя задача — НЕ нарезать ролик подряд, а ВЫУДИТЬ ЗОЛОТО: выбрать отдельные \
+самодостаточные моменты, где проговаривается одна ясная, неочевидная или эмоционально \
+цепляющая мысль, которая работает как клип сама по себе.
 
-Принципы отбора:
-- Бери куски 15–60 секунд. Большая часть ролика НЕ должна дать ничего — это нормально.
-- Границы — по предложениям: клип начинается с сильной фразы (хук в первые ~2 сек) и \
-заканчивается развязкой, не обрываясь на полуслове.
-- Поле transcript должен содержать ПОЛНУЮ мысль: начинаться с начала предложения и \
-заканчиваться его концом. Метки [MM:SS] — просто ориентиры, текст между ними непрерывен; \
-если предложение начинается до метки — включи его начало из предыдущего абзаца.
-- Каждый кусок должен быть понятен сам по себе. Если для смысла нужен контекст до/после — пропускай.
-- ИГНОРИРУЙ И НЕ ВКЛЮЧАЙ: рекламные вставки и спонсорские чтения, само-промо канала \
-(«подпишись», «лайк», промокоды, ссылки), организационные подводки, повторы, оффтоп, болтовню.
-- Ищи разнообразие: разные мысли из разных мест ролика, а не вариации одной.
+Каждый клип ты задаёшь ДИАПАЗОНОМ предложений: first_sentence и last_sentence \
+(включительно). В клип попадёт дословно всё от начала первого до конца последнего \
+предложения диапазона — выбирай так, чтобы этот текст читался как цельное, законченное \
+высказывание.
 
-Тебе также дают список «самых пересматриваемых» моментов (heatmap) — это сигнал, где \
-зрители залипают. Учитывай его, но суди самостоятельно: heatmap помогает, а не диктует.
+Требования к диапазону:
+- 15–60 секунд речи (ориентируйся по меткам [MM:SS] первого и последнего предложения).
+- МЫСЛЬ ЦЕЛИКОМ: если ключевая фраза опирается на контекст («this», «that experiment», \
+«it» из предыдущей фразы, ответ на вопрос ведущего) — ВКЛЮЧИ предложения с этим \
+контекстом в диапазон. Зритель видит только клип: перечитай текст диапазона глазами \
+человека, который не смотрел ролик.
+- Первое предложение диапазона — сильный хук; последнее — развязка. Не начинай с \
+вялых подводок («So», «And», «Yeah» без содержания) — сдвинь диапазон.
+- Некоторые «предложения» оборваны паузой в речи и не заканчиваются точкой — НЕ \
+заканчивай диапазон таким предложением, включи продолжение до конца фразы.
+- Большая часть ролика не должна дать ничего — это нормально. Качество важнее количества.
+- НЕ включай: рекламные вставки и спонсорские чтения, само-промо канала (подписка, \
+промокоды), вступительный трейлер-нарезку ролика, организационную болтовню, повторы.
+- Ищи разнообразие: разные мысли из разных мест ролика.
 
-Для каждого выбранного куска заполни:
-- start_s / end_s — таймкоды в СЕКУНДАХ от начала ролика;
-- title — цепляющий заголовок;
-- summary — одна фраза о сути;
-- hook — что прозвучит в первые ~2 секунды клипа;
-- transcript — точный текст куска (для субтитров);
-- scores (0–5 каждая): self_contained (понятно без контекста), hook (сила первых секунд), \
-insight (неочевидность), emotion (эмоция/цитируемость), payoff (есть развязка);
-- why — чем кусок ценен для шортса.
+Тебе также дают «самые пересматриваемые» моменты (heatmap) — сигнал, где зрители \
+залипают. Учитывай, но суди самостоятельно.
 
-Верни 10–15 лучших кандидатов. Не добивай количество слабыми кусками — качество важнее.\
+Для каждого клипа заполни: first_sentence, last_sentence, title (цепляющий заголовок), \
+summary (одна фраза о сути), hook (что прозвучит в первые ~2 секунды — это начало \
+ПЕРВОГО предложения диапазона), scores (0–5: self_contained — понятно без контекста \
+ролика; hook — сила первых секунд; insight — неочевидность; emotion — эмоция/цитируемость; \
+payoff — есть развязка), why (чем ценен для шортса).
+
+Верни 10–15 лучших кандидатов.\
 """
 
 
-def _user_prompt(meta: VideoMeta) -> str:
+def _user_prompt(meta: VideoMeta, sentences: list[tuple[float, float, str]]) -> str:
     peaks = heatmap_peaks(meta.heatmap)
     peak_lines = "\n".join(f"- {mmss(t)} (интенсивность {v:.2f})" for t, v in peaks)
+    sent_lines = "\n".join(
+        f"S{i} [{mmss(s)}] {text}" + ("" if _ENDS_CLEAN.search(text) else " ⋯")
+        for i, (s, _e, text) in enumerate(sentences)
+    )
     return (
         f"РОЛИК: {meta.title} (длительность {mmss(meta.duration_s)})\n\n"
         f"САМЫЕ ПЕРЕСМАТРИВАЕМЫЕ МОМЕНТЫ (heatmap):\n{peak_lines or '— нет данных —'}\n\n"
-        f"ТРАНСКРИПТ (таймкоды [MM:SS]):\n{meta.transcript}"
+        f"ТРАНСКРИПТ ПО ПРЕДЛОЖЕНИЯМ:\n{sent_lines}"
     )
 
 
@@ -89,23 +104,6 @@ def _heatmap_boost(start_s: float, end_s: float, heatmap: list[tuple[float, floa
 
 def _total(scores, heatmap_boost: float) -> float:
     return round(sum(WEIGHTS[k] * getattr(scores, k) for k in WEIGHTS) + heatmap_boost, 3)
-
-
-def _snap(draft, word_timings) -> tuple[float, float]:
-    """Точные (start_s, end_s): привязка по пословному VTT + расширение до предложений.
-
-    Расширение гарантирует целостность мысли: клип не начнётся/оборвётся посреди
-    фразы, даже если LLM скопировал текст с границы 20с-абзаца транскрипта.
-    """
-    if not word_timings:
-        return draft.start_s, draft.end_s
-    snapped = snap_timecodes(word_timings, draft.transcript)
-    if snapped and SNAP_MIN_S <= (snapped[1] - snapped[0]) <= SNAP_MAX_S:
-        start, end = snapped
-    else:
-        start, end = draft.start_s, draft.end_s
-    start, end = extend_to_sentence_bounds(word_timings, start, end)
-    return round(start, 2), round(end, 2)
 
 
 def segment(
@@ -120,21 +118,50 @@ def segment(
     client = client or anthropic.Anthropic(api_key=cfg.anthropic_api_key)
     model = model or cfg.analyzer_model
 
+    sentences = build_sentences(meta.word_timings)
+    if not sentences:
+        raise RuntimeError("analyzer: нет пословных таймкодов — не из чего строить предложения")
+
     resp = client.messages.parse(
         model=model,
         max_tokens=16000,
         system=SYSTEM,
-        messages=[{"role": "user", "content": _user_prompt(meta)}],
+        messages=[{"role": "user", "content": _user_prompt(meta, sentences)}],
         output_format=SegmentSelection,
     )
     selection = resp.parsed_output
 
     scored: list[Segment] = []
     for d in selection.segments:
-        start_s, end_s = _snap(d, meta.word_timings)   # точные таймкоды по пословному VTT
+        i = max(0, min(d.first_sentence, len(sentences) - 1))
+        j = max(i, min(d.last_sentence, len(sentences) - 1))
+        # хвост оборван паузой (нет завершающей пунктуации) → дотянуть до конца фразы
+        j0 = j
+        while (
+            j < len(sentences) - 1
+            and not _ENDS_CLEAN.search(sentences[j][2])
+            and j - j0 < MAX_TAIL_EXTEND_SENTENCES
+            and sentences[j + 1][1] - sentences[j0][1] <= MAX_TAIL_EXTEND_S
+        ):
+            j += 1
+        start_s, end_s = sentences[i][0], sentences[j][1]
+        if not (MIN_CLIP_S <= end_s - start_s <= MAX_CLIP_S):
+            log.warning(
+                "drop '%s': S%s–S%s = %.0fs вне пределов %s–%ss",
+                d.title, i, j, end_s - start_s, MIN_CLIP_S, MAX_CLIP_S,
+            )
+            continue
+        transcript = " ".join(text for _s, _e, text in sentences[i : j + 1])
         boost = _heatmap_boost(start_s, end_s, meta.heatmap)
-        data = d.model_dump()
-        data["start_s"], data["end_s"] = start_s, end_s
-        scored.append(Segment(**data, heatmap_boost=boost, total=_total(d.scores, boost)))
+        scored.append(
+            Segment(
+                **d.model_dump(),
+                start_s=round(start_s, 2),
+                end_s=round(end_s, 2),
+                transcript=transcript,
+                heatmap_boost=boost,
+                total=_total(d.scores, boost),
+            )
+        )
     scored.sort(key=lambda s: s.total, reverse=True)
     return scored[:top_k]

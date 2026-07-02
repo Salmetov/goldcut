@@ -156,6 +156,40 @@ def snap_timecodes(
 _SENT_END = re.compile(r"[.!?…][\"')\]]*$")
 
 
+def build_sentences(
+    words: list[tuple[float, str]],
+    *,
+    pause_s: float = 1.2,
+    max_words: int = 45,
+    tail_pad_s: float = 0.6,
+) -> list[tuple[float, float, str]]:
+    """Пословный поток → список предложений (start_s, end_s, text).
+
+    Границы: пунктуация конца предложения в авто-сабах, длинная пауза в речи,
+    либо принудительный разрез после max_words (защита от кусков без пунктуации).
+    end_s предложения = начало следующего слова (полный хвост последнего слова).
+    Это канонические единицы для выбора клипов: LLM выбирает диапазон предложений,
+    код берёт их точные таймкоды — никакой привязки текста не нужно.
+    """
+    sentences: list[tuple[float, float, str]] = []
+    cur: list[tuple[float, str]] = []
+    for k, (t, w) in enumerate(words):
+        cur.append((t, w))
+        next_t = words[k + 1][0] if k + 1 < len(words) else None
+        boundary = (
+            _SENT_END.search(w)
+            or (next_t is not None and next_t - t > pause_s)
+            or len(cur) >= max_words
+        )
+        if boundary:
+            end_s = next_t if next_t is not None else t + tail_pad_s
+            sentences.append((cur[0][0], end_s, " ".join(x for _, x in cur)))
+            cur = []
+    if cur:
+        sentences.append((cur[0][0], cur[-1][0] + tail_pad_s, " ".join(x for _, x in cur)))
+    return sentences
+
+
 def extend_to_sentence_bounds(
     words: list[tuple[float, str]],
     start_s: float,
