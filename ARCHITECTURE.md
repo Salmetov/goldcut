@@ -23,10 +23,11 @@
 2. `analyzer.segment(transcript)` прогоняет LLM: находит самодостаточные мысли (границы по предложениям), оценивает каждую по рубрике, накладывает heatmap-буст, возвращает ранжированный список `Segment`.
 3. `bot` показывает top-K с таймкодом, заголовком, саммари и «почему зайдёт».
 
-**Стадия B — монтаж (тяжёлое, только выбранное):**
-4. Ты отмечаешь нужные куски.
-5. `fetcher.cut(url, sections)` скачивает **только эти отрезки** (`yt-dlp --download-sections`).
-6. `cutter` переводит в 9:16 и вшивает субтитры.
+**Стадия B — монтаж (тяжёлое, только по запросу):**
+4. Ты отмечаешь нужные куски в боте.
+5. `fetcher.fetch_video(url)` — Mac кэширует полный mp4, сервер забирает его по tailnet
+   (одна закачка с YouTube на видео; см. ADR 0002).
+6. `cutter` режет локально: 9:16 (blur-фон) + вшитые субтитры из пословных таймкодов.
 7. `publisher` готовит черновик + описание/хэштеги.
 
 Сервер никогда не ходит в YouTube напрямую — это делает Mac (см. ADR 0001).
@@ -35,8 +36,9 @@
 
 Добыча изолирована за интерфейсом `Fetcher` (`src/goldcut/fetcher/`). Бэкенд сейчас — **Mac через Tailscale**, но шов позволяет подменить на residential-прокси / телефон / cookies без правок остального кода. Это единственная намеренная абстракция на старте — она оправдана, потому что именно тут лежит главный риск (блокировка по IP).
 
-- `fetcher/client.py` — серверная сторона: дёргает воркер на Mac по tailnet.
-- `fetcher/worker.py` — крутится **на Mac**: HTTP-воркер поверх `yt-dlp`, слушает только Tailscale-интерфейс.
+- `fetcher/client.py` — серверная сторона: дёргает воркер на Mac по tailnet (httpx).
+- `fetcher/worker.py` — крутится **на Mac** под launchd: чистый stdlib (`http.server`)
+  поверх standalone-бинаря `yt-dlp`, слушает только Tailscale-интерфейс. Без pip/brew.
 
 ## Данные
 
@@ -44,11 +46,11 @@
 
 ## Стек
 
-- Python 3.12+
-- `yt-dlp` + `ffmpeg` (на Mac)
-- Telegram: бот (+ self-hosted Bot API сервер для файлов > 20 МБ)
+- Python 3.12+ (сервер: venv с anthropic/httpx/python-telegram-bot; Mac: голый stdlib)
+- `yt-dlp` (standalone-бинарь на Mac) + `ffmpeg` (apt, на сервере)
+- Telegram: python-telegram-bot, systemd-юнит в `deploy/goldcut-bot.service`
 - LLM: Claude (модель настраивается в `.env`, см. `config.py`)
-- Воркер на Mac: лёгкий HTTP (FastAPI), доступен только по tailnet
+- Воркер на Mac: stdlib `http.server` под launchd, доступен только по tailnet
 
 ## Принципы
 

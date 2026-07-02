@@ -4,13 +4,13 @@ version = "0.0.1"
 description = "Выуживание «золота» из длинных видео в короткие клипы для TikTok"
 requires-python = ">=3.12"
 dependencies = [
-    "yt-dlp>=2025.1.0",      # добыча (на Mac-воркере)
     "anthropic>=0.40.0",     # LLM-анализ (Claude)
+    "pydantic>=2.0",         # модели + structured output
     "httpx>=0.27",           # fetcher.client -> воркер по tailnet
-    "fastapi>=0.110",        # fetcher.worker на Mac
-    "uvicorn>=0.30",
     "python-telegram-bot>=21.0",
 ]
+# Воркер на Mac — чистый stdlib (без pip/brew): yt-dlp там standalone-бинарь,
+# HTTP — http.server. См. src/goldcut/fetcher/worker.py и ADR 0002.
 
 [project.optional-dependencies]
 dev = ["ruff", "pytest"]

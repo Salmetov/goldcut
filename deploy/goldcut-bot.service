@@ -1,0 +1,19 @@
+# systemd-юнит Telegram-бота goldcut (на сервере)
+# Установка:
+#   cp deploy/goldcut-bot.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now goldcut-bot
+[Unit]
+Description=goldcut Telegram bot
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/goldcut
+Environment=PYTHONPATH=/root/goldcut/src
+ExecStart=/root/goldcut/.venv/bin/python -m goldcut.bot.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

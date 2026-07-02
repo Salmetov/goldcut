@@ -31,8 +31,13 @@ def mmss(t: float) -> str:
 
 
 def parse_vtt(path: str | Path, bucket_s: int = 20) -> str:
+    """VTT-файл → строки вида '[MM:SS] текст' (см. parse_vtt_text)."""
+    return parse_vtt_text(Path(path).read_text(encoding="utf-8"), bucket_s)
+
+
+def parse_vtt_text(vtt_text: str, bucket_s: int = 20) -> str:
     """VTT → строки вида '[MM:SS] текст', сгруппированные по ~bucket_s секунд."""
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    lines = vtt_text.splitlines()
     pairs: list[tuple[float, str]] = []
     cur: float | None = None
     last: str | None = None
@@ -78,13 +83,18 @@ def heatmap_peaks(
 
 
 def parse_vtt_words(path: str | Path) -> list[tuple[float, str]]:
+    """VTT-файл → пословный поток (см. parse_vtt_words_text)."""
+    return parse_vtt_words_text(Path(path).read_text(encoding="utf-8"))
+
+
+def parse_vtt_words_text(vtt_text: str) -> list[tuple[float, str]]:
     """Пословный поток (секунды, слово) из таймкодов авто-сабов YouTube.
 
     Берём только строки с пословными тегами <ts>; первое слово до первого тега
     получает время реплики, остальные — свой <ts>. Не-таймкодированные строки
     (дубли «прокрутки») пропускаются → естественный дедуп.
     """
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    lines = vtt_text.splitlines()
     words: list[tuple[float, str]] = []
     cue_start: float | None = None
     for line in lines:
