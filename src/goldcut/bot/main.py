@@ -26,6 +26,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    PicklePersistence,
     filters,
 )
 
@@ -65,8 +66,32 @@ def _log_segments(url: str, title: str, segs) -> None:
 
 async def cmd_start(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Привет! Кинь ссылку на YouTube-видео — найду в нём золото и предложу клипы для TikTok."
+        "Привет! Кинь ссылку на YouTube-видео — найду в нём золото и предложу клипы для TikTok.\n"
+        "Повторная ссылка отвечает мгновенно (кэш); /reanalyze — прогнать отбор заново."
     )
+
+
+async def cmd_reanalyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Принудительно перегнать анализ последнего ролика (перезаписывает кэш)."""
+    pending = context.user_data.get("pending")
+    if not pending:
+        await update.message.reply_text("Сначала пришли ссылку на YouTube-видео.")
+        return
+    url = pending["url"]
+    await update.message.reply_text("🔁 Прогоняю отбор заново (~1 мин)…")
+    await update.effective_chat.send_action(ChatAction.TYPING)
+    try:
+        meta = await asyncio.to_thread(FETCHER.meta, url)
+        segs = await asyncio.to_thread(
+            segment, meta, CFG.top_k, force=True, cache_dir="/root/goldcut/cache"
+        )
+    except Exception as exc:
+        log.exception("reanalyze failed")
+        await update.message.reply_text(f"❌ Не получилось: {exc}")
+        return
+    _log_segments(url, meta.title, segs)
+    context.user_data["pending"] = {"url": url, "meta": meta, "segs": segs}
+    await update.message.reply_text(_format_candidates(segs))
 
 
 def _format_candidates(segs) -> str:
@@ -92,7 +117,9 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"📄 Транскрипт получен ({mmss(meta.duration_s)} видео). Claude ищет золото (~1 мин)…"
         )
         await chat.send_action(ChatAction.TYPING)
-        segs = await asyncio.to_thread(segment, meta, CFG.top_k)
+        segs = await asyncio.to_thread(
+            segment, meta, CFG.top_k, cache_dir="/root/goldcut/cache"
+        )
     except Exception as exc:
         log.exception("analyze failed")
         await update.message.reply_text(f"❌ Не получилось: {exc}")
@@ -158,9 +185,12 @@ def main() -> None:
         .write_timeout(60)
         .media_write_timeout(600)   # загрузка клипов: дефолтные 20с рвутся на ~7MB
         .pool_timeout(10)
+        # выбор клипов (pending) переживает рестарты бота
+        .persistence(PicklePersistence(filepath="/root/goldcut/bot_state.pickle"))
         .build()
     )
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("reanalyze", cmd_reanalyze))
     app.add_handler(MessageHandler(filters.Regex(YOUTUBE_RE), handle_url))
     app.add_handler(MessageHandler(filters.Regex(NUMBERS_RE) & filters.TEXT, handle_selection))
     log.info("goldcut bot: polling…")

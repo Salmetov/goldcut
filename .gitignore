@@ -27,3 +27,4 @@ media/
 cache/
 clips/
 logs/
+bot_state.pickle*

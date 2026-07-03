@@ -8,10 +8,19 @@ analyzer / cutter / bot.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Protocol
 
 from goldcut.models import VideoMeta
+
+_YT_ID = re.compile(r"(?:youtu\.be/|[?&]v=|/shorts/|/live/)([A-Za-z0-9_-]{11})")
+
+
+def youtube_id(url: str) -> str | None:
+    """11-символьный ID ролика из любой формы YouTube-ссылки (ключ кэшей)."""
+    m = _YT_ID.search(url)
+    return m.group(1) if m else None
 
 
 class Fetcher(Protocol):

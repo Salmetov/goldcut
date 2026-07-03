@@ -10,17 +10,23 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+from pathlib import Path
 
 import anthropic
 
-import re
-
 from goldcut.config import Config
+from goldcut.fetcher import youtube_id
 from goldcut.models import Segment, SegmentSelection, VideoMeta
 from goldcut.transcript import build_sentences, mmss
 
 log = logging.getLogger(__name__)
+
+# Версия метода отбора. Бампается при изменении брифа/весов/сегментации —
+# старые кэши анализа при этом автоматически считаются устаревшими.
+ANALYZER_VERSION = "v3"
 
 _ENDS_CLEAN = re.compile(r"[.!?…][\"')\]]*$")
 
@@ -98,12 +104,28 @@ def segment(
     *,
     client: anthropic.Anthropic | None = None,
     model: str | None = None,
+    force: bool = False,
+    cache_dir: str | Path = "cache",
 ) -> list[Segment]:
-    """Вернуть top-K ранжированных кандидатов на клип."""
+    """Вернуть top-K ранжированных кандидатов на клип.
+
+    Результат кэшируется по (video_id, ANALYZER_VERSION, model): повторный запрос
+    того же ролика — мгновенный и бесплатный, номера клипов стабильны. force=True
+    (команда /reanalyze) прогоняет заново и перезаписывает кэш; изменение метода
+    (бамп ANALYZER_VERSION) или модели инвалидирует кэш само.
+    """
     cfg = Config.from_env()
-    client = client or anthropic.Anthropic(api_key=cfg.anthropic_api_key)
     model = model or cfg.analyzer_model
 
+    vid = youtube_id(meta.url)
+    cache = (
+        Path(cache_dir) / f"{vid}.analysis-{ANALYZER_VERSION}-{model}.json" if vid else None
+    )
+    if cache and cache.exists() and not force:
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        return [Segment.model_validate(s) for s in data["segments"]][:top_k]
+
+    client = client or anthropic.Anthropic(api_key=cfg.anthropic_api_key)
     sentences = build_sentences(meta.word_timings)
     if not sentences:
         raise RuntimeError("analyzer: нет пословных таймкодов — не из чего строить предложения")
@@ -148,4 +170,13 @@ def segment(
             )
         )
     scored.sort(key=lambda s: s.total, reverse=True)
+
+    if cache:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(
+            json.dumps(
+                {"segments": [s.model_dump() for s in scored]}, ensure_ascii=False
+            ),
+            encoding="utf-8",
+        )
     return scored[:top_k]

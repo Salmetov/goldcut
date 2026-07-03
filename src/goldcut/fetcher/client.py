@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 
+from goldcut.fetcher import youtube_id
 from goldcut.models import VideoMeta
 from goldcut.transcript import parse_vtt_text, parse_vtt_words_text
 
@@ -29,8 +30,23 @@ class TailscaleFetcher:
         with httpx.Client(timeout=10) as c:
             return c.get(f"{self.base_url}/health").json()
 
-    def meta(self, url: str, sub_langs: str = "en.*") -> VideoMeta:
-        """Стадия A: субтитры + heatmap (килобайты). Видео не скачивается."""
+    def meta(self, url: str, sub_langs: str = "en.*", *, force: bool = False) -> VideoMeta:
+        """Стадия A: субтитры + heatmap (килобайты). Видео не скачивается.
+
+        Результат кэшируется на диске по video_id: субтитры готового ролика не
+        меняются, поэтому повторная ссылка не ходит на Mac/YouTube вообще.
+        """
+        vid = youtube_id(url)
+        cache = self.cache_dir / f"{vid}.meta.json" if vid else None
+        if cache and cache.exists() and not force:
+            return VideoMeta.model_validate_json(cache.read_text(encoding="utf-8"))
+        meta = self._meta_fetch(url, sub_langs)
+        if cache:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            cache.write_text(meta.model_dump_json(), encoding="utf-8")
+        return meta
+
+    def _meta_fetch(self, url: str, sub_langs: str) -> VideoMeta:
         with httpx.Client(timeout=300) as c:
             r = c.post(f"{self.base_url}/meta", json={"url": url, "sub_langs": sub_langs})
             r.raise_for_status()
