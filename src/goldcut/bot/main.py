@@ -131,8 +131,16 @@ async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await asyncio.to_thread(cut_clip, source, seg_, out, word_timings)
             caption = f"{seg_.title}\n⚡ {seg_.hook}\n🕐 {mmss(seg_.start_s)}–{mmss(seg_.end_s)}"
             await update.effective_chat.send_action(ChatAction.UPLOAD_VIDEO)
-            with open(out, "rb") as f:
-                await update.message.reply_video(f, caption=caption[:1024])
+            # загрузка больших файлов в Telegram может флапнуть — пробуем до 3 раз
+            for attempt in range(3):
+                try:
+                    with open(out, "rb") as f:
+                        await update.message.reply_video(f, caption=caption[:1024])
+                    break
+                except Exception:
+                    if attempt == 2:
+                        raise
+                    log.warning("upload clip %s: попытка %s не прошла, повтор", n, attempt + 1)
         except Exception as exc:
             log.exception("clip %s failed", n)
             await update.message.reply_text(f"❌ Клип {n} не получился: {exc}")
@@ -142,7 +150,16 @@ async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 def main() -> None:
     if not CFG.telegram_bot_token:
         raise SystemExit("TELEGRAM_BOT_TOKEN не задан в .env")
-    app = Application.builder().token(CFG.telegram_bot_token).build()
+    app = (
+        Application.builder()
+        .token(CFG.telegram_bot_token)
+        .connect_timeout(10)
+        .read_timeout(60)
+        .write_timeout(60)
+        .media_write_timeout(600)   # загрузка клипов: дефолтные 20с рвутся на ~7MB
+        .pool_timeout(10)
+        .build()
+    )
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(MessageHandler(filters.Regex(YOUTUBE_RE), handle_url))
     app.add_handler(MessageHandler(filters.Regex(NUMBERS_RE) & filters.TEXT, handle_selection))
