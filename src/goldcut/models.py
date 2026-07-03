@@ -43,8 +43,7 @@ class Segment(SegmentDraft):
     start_s: float = 0.0         # из первого предложения диапазона
     end_s: float = 0.0           # из последнего предложения диапазона
     transcript: str = ""         # дословный текст диапазона (для сабов/проверки)
-    heatmap_boost: float = 0.0   # бонус по «самым пересматриваемым» местам YouTube
-    total: float = 0.0           # итоговый взвешенный балл
+    total: float = 0.0           # итоговый взвешенный балл (только рубрика LLM)
 
     @property
     def duration_s(self) -> float:
