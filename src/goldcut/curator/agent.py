@@ -48,6 +48,22 @@ TOOLS = [
             "required": ["ids"],
         },
     },
+    {
+        "name": "cut_range",
+        "description": "Вырезать ПРОИЗВОЛЬНЫЙ таймкод-диапазон, который пользователь назвал сам "
+        "(напр. «с 32:53 до 34:34»), НЕ привязываясь к найденным моментам. Так же режь непрерывный "
+        "диапазон, покрывающий несколько соседних моментов (напр. 26:21–28:46 одним куском). "
+        "start/end — таймкоды 'MM:SS' или 'HH:MM:SS'. Вызывай после согласия. Списывает квоту.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "start": {"type": "string", "description": "начало, напр. '32:53'"},
+                "end": {"type": "string", "description": "конец, напр. '34:34'"},
+                "title": {"type": "string", "description": "короткий заголовок (опц.)"},
+            },
+            "required": ["start", "end"],
+        },
+    },
 ]
 
 SYSTEM = """\
@@ -55,15 +71,17 @@ SYSTEM = """\
 ВЫРЕЗАТЬ из него нужные фрагменты через разговор.
 
 Как работать:
-- Понял, какие моменты нужны — вызови find_moments(topic, count). Покажи пользователю \
-найденное списком: номер, таймкод, заголовок, коротко суть. Спроси, что резать.
-- Пользователь уточняет свободным текстом («этот убери», «а есть про X», «покороче», \
-«давай 1 и 3») — реагируй: при новой теме снова find_moments, при выборе — уточни и \
-подтверди.
-- РЕЗАТЬ можно только после явного согласия. Перед нарезкой переспроси: «режу N и M?». \
-Получил «да»/«давай» — вызови cut_and_send(ids) с нужными id.
-- Не выдумывай таймкоды и моменты — только то, что вернул find_moments. Отвечай кратко, \
-по-русски, дружелюбно. id — это индексы из последнего find_moments.\
+- Поиск по теме — вызови find_moments(topic, count). Покажи найденное списком: номер, \
+таймкод, заголовок, суть. Спроси, что резать.
+- Пользователь уточняет свободным текстом («этот убери», «а есть про X», «давай 1 и 3») — \
+реагируй: новая тема → снова find_moments; выбор моментов → cut_and_send(ids).
+- ЕСЛИ пользователь называет КОНКРЕТНЫЙ таймкод-диапазон («вырежи с 32:53 до 34:34», \
+«дай кусок 26:21–28:46 одним роликом») — режь его НАПРЯМУЮ через cut_range(start, end), \
+не привязывайся к найденным моментам и не отказывай. Один непрерывный диапазон = один cut_range.
+- РЕЗАТЬ только после явного согласия. Перед нарезкой коротко переспроси. Получил «да»/«давай» \
+— вызывай инструмент.
+- Для find_moments НЕ выдумывай таймкоды — только то, что вернул инструмент. Для cut_range — \
+бери таймкоды, которые назвал пользователь. Отвечай кратко, по-русски, дружелюбно.\
 """
 
 
@@ -85,38 +103,68 @@ async def _exec_find(inp: dict, ctx: "Ctx") -> str:
     return _fmt_candidates(cands)
 
 
-async def _exec_cut(inp: dict, ctx: "Ctx") -> str:
-    ids = inp.get("ids", [])
-    if not ctx.candidates:
-        return "Сначала найди моменты (find_moments)."
-    picked = [(i, ctx.candidates[i]) for i in ids if 0 <= i < len(ctx.candidates)]
-    if not picked:
-        return "Неверные id."
-    # ГЕЙТ: квота
-    q = billing.check_quota(ctx.store, ctx.account, ctx.cfg)
-    if not q.allowed:
+def _parse_tc(s: str) -> float:
+    """'MM:SS' / 'H:MM:SS' / секунды → секунды."""
+    s = str(s).strip()
+    if ":" in s:
+        sec = 0.0
+        for p in s.split(":"):
+            sec = sec * 60 + float(p)
+        return sec
+    return float(s)
+
+
+async def _cut_and_deliver(ctx: "Ctx", segments: list) -> str:
+    """segments: (label, start_s, end_s, title). Гейт квоты → нарезка → доставка → списание."""
+    if not billing.check_quota(ctx.store, ctx.account, ctx.cfg).allowed:
         return "GATE: лимит бесплатных вырезок исчерпан. Предложи оформить Premium."
     source = await asyncio.to_thread(ctx.fetcher.fetch_video, ctx.url)
     done, stopped = [], False
-    for i, c in picked:
-        q = billing.check_quota(ctx.store, ctx.account, ctx.cfg)
-        if not q.allowed:
+    for label, start_s, end_s, title in segments:
+        if not billing.check_quota(ctx.store, ctx.account, ctx.cfg).allowed:
             stopped = True
             break
-        out = ctx.clips_dir / f"{source.stem}_{int(c.start_s)}_{int(c.end_s)}.mp4"
+        c = Candidate(start_s=start_s, end_s=end_s, transcript="", title=title, confidence=1.0)
+        out = ctx.clips_dir / f"{source.stem}_{int(start_s)}_{int(end_s)}.mp4"
         try:
             await asyncio.to_thread(delivery_render, source, c, out, ctx.profile, ctx.meta)
         except Exception as exc:
             log.exception("cut failed")
-            done.append(f"#{i} ошибка: {exc}")
+            done.append(f"{label} ошибка: {exc}")
             continue
         file_id = await ctx.send_video(out, delivery.caption_for(c, ctx.meta))
         delivery.record_and_charge(ctx.store, ctx.account.id, ctx.url, ctx.meta, c, ctx.profile, file_id)
-        done.append(f"#{i} ✅")
+        done.append(f"{label} ✅")
     left = billing.check_quota(ctx.store, ctx.account, ctx.cfg)
     tail = "" if left.limit is None else f" Осталось: {left.remaining}/{left.limit}."
     note = " Лимит закончился на середине — остаток не порезал." if stopped else ""
     return f"Готово: {', '.join(done)}.{tail}{note}"
+
+
+async def _exec_cut(inp: dict, ctx: "Ctx") -> str:
+    if not ctx.candidates:
+        return "Сначала найди моменты (find_moments)."
+    picked = [(i, ctx.candidates[i]) for i in inp.get("ids", []) if 0 <= i < len(ctx.candidates)]
+    if not picked:
+        return "Неверные id."
+    return await _cut_and_deliver(ctx, [(f"#{i}", c.start_s, c.end_s, c.title) for i, c in picked])
+
+
+async def _exec_cut_range(inp: dict, ctx: "Ctx") -> str:
+    try:
+        start_s, end_s = _parse_tc(inp["start"]), _parse_tc(inp["end"])
+    except (KeyError, ValueError):
+        return "Не понял таймкоды. Формат MM:SS или HH:MM:SS."
+    if end_s <= start_s:
+        return "Конец должен быть позже начала."
+    if end_s - start_s < 3:
+        return "Слишком короткий диапазон (<3с)."
+    if ctx.meta.duration_s and end_s > ctx.meta.duration_s + 2:
+        return f"Диапазон за пределами ролика (длительность {mmss(ctx.meta.duration_s)})."
+    if end_s - start_s > 600:
+        return "Слишком длинный кусок (>10 мин) — Telegram не пропустит. Возьми короче."
+    label = f"{mmss(start_s)}–{mmss(end_s)}"
+    return await _cut_and_deliver(ctx, [(label, start_s, end_s, inp.get("title") or label)])
 
 
 def delivery_render(source, c: Candidate, out, profile: RenderProfile, meta: VideoMeta):
@@ -167,8 +215,12 @@ async def run_turn(user_text: str, messages: list, ctx: Ctx) -> tuple[str, list]
             break
         results = []
         for b in tool_uses:
-            out = await (_exec_find(b.input, ctx) if b.name == "find_moments"
-                         else _exec_cut(b.input, ctx))
+            if b.name == "find_moments":
+                out = await _exec_find(b.input, ctx)
+            elif b.name == "cut_range":
+                out = await _exec_cut_range(b.input, ctx)
+            else:
+                out = await _exec_cut(b.input, ctx)
             results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
         messages.append({"role": "user", "content": results})
     return reply, messages
