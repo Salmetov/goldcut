@@ -11,7 +11,7 @@ from __future__ import annotations
 import anthropic
 from pydantic import BaseModel
 
-from goldcut.config import Config
+from goldcut.config import Config, anthropic_client
 from goldcut.models import RenderProfile, Request
 
 NLU_VERSION = "v1"
@@ -68,7 +68,7 @@ def parse(
     cfg: Config | None = None,
 ) -> Request:
     cfg = cfg or Config.from_env()
-    client = client or anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = client or anthropic_client(cfg)
     resp = client.messages.parse(
         model=model or cfg.analyzer_model,
         max_tokens=500,

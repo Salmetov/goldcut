@@ -18,7 +18,6 @@ import logging
 import re
 from pathlib import Path
 
-import anthropic
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import (
@@ -32,7 +31,7 @@ from telegram.ext import (
 )
 
 from goldcut import accounts, billing, delivery, nlu
-from goldcut.config import Config
+from goldcut.config import Config, anthropic_client
 from goldcut.curator import agent as curator_agent
 from goldcut.cutter import render
 from goldcut.fetcher.local import LocalFetcher
@@ -49,7 +48,7 @@ STORE = Store(CFG.database_url)
 FETCHER = LocalFetcher(
     cache_dir="/root/goldcut-dev/cache", ytdlp="/root/goldcut-dev/.venv/bin/yt-dlp"
 )
-LLM = anthropic.Anthropic(api_key=CFG.anthropic_api_key)
+LLM = anthropic_client(CFG)
 CLIPS = Path("/root/goldcut-dev/clips")
 YOUTUBE_RE = re.compile(r"(https?://)?(www\.)?(youtube\.com/(watch|shorts)|youtu\.be/)\S+")
 NUDGE_S = 15.0

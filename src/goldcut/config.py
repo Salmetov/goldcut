@@ -20,6 +20,25 @@ def load_dotenv(path: str | Path = ".env") -> None:
         os.environ.setdefault(key.strip(), val.strip())
 
 
+def anthropic_client(cfg: "Config"):
+    """Anthropic-клиент с форсом IPv4.
+
+    На сервере нет IPv6; резолвер иногда отдаёт AAAA-запись api.anthropic.com
+    первой → httpx пытается IPv6 и падает с EAFNOSUPPORT («Connection error»).
+    local_address='0.0.0.0' биндит сокет на IPv4 → только IPv4-коннекты.
+    """
+    import anthropic
+    import httpx
+
+    return anthropic.Anthropic(
+        api_key=cfg.anthropic_api_key,
+        http_client=httpx.Client(
+            transport=httpx.HTTPTransport(local_address="0.0.0.0"),
+            timeout=httpx.Timeout(600.0, connect=10.0),
+        ),
+    )
+
+
 @dataclass
 class Config:
     # LLM-анализ (Claude). Модель настраивается — не хардкодим в коде анализа.

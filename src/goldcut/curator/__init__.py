@@ -12,7 +12,7 @@ import re
 import anthropic
 from pydantic import BaseModel
 
-from goldcut.config import Config
+from goldcut.config import Config, anthropic_client
 from goldcut.models import Candidate, VideoMeta
 from goldcut.transcript import build_sentences, mmss
 
@@ -68,7 +68,7 @@ def find_moments(
     if not sentences:
         raise RuntimeError("find_moments: нет пословных таймкодов")
 
-    client = client or anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = client or anthropic_client(cfg)
     sent_lines = "\n".join(f"S{i} [{mmss(s)}] {t}" for i, (s, _e, t) in enumerate(sentences))
     user = (
         f"РОЛИК: {meta.title}\nЗАПРОС: {topic}\nN = {count}\n\n"

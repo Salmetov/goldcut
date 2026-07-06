@@ -17,7 +17,7 @@ import logging
 import anthropic
 from pydantic import BaseModel
 
-from goldcut.config import Config
+from goldcut.config import Config, anthropic_client
 from goldcut.models import Candidate, Request, VideoMeta
 from goldcut.transcript import build_sentences, mmss
 
@@ -103,7 +103,7 @@ def locate(
         return [_around_anchor(sentences, request.time_anchor_s, target)]
 
     # есть тема → LLM выбирает диапазон в окне
-    client = client or anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    client = client or anthropic_client(cfg)
     window = [(i, sentences[i]) for i in range(lo, hi + 1)]
     sent_lines = "\n".join(f"S{i} [{mmss(s)}] {t}" for i, (s, _e, t) in window)
     query = request.topic or request.raw
