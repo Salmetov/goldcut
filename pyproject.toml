@@ -6,10 +6,14 @@ requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.40.0",     # LLM-анализ (Claude)
     "pydantic>=2.0",         # модели + structured output
-    "httpx>=0.27",           # fetcher.client -> воркер по tailnet; ASR-фолбэк -> Soniox
+    "httpx>=0.27",           # fetcher/API/telegram
     "python-telegram-bot>=21.0",
     "psycopg[binary]>=3.1",  # store -> Postgres (goldcut)
+    "yt-dlp[default]>=2026.1",  # добыча на сервере (+curl_cffi, +yt-dlp-ejs для n-challenge)
+    "fastapi>=0.115",        # API mini-app
+    "uvicorn[standard]>=0.30",
 ]
+# Внешние (не pip): deno (JS-рантайм для yt-dlp-ejs, /root/.deno/bin/deno), ffmpeg (apt).
 # Воркер на Mac — чистый stdlib (без pip/brew): yt-dlp там standalone-бинарь,
 # HTTP — http.server. См. src/goldcut/fetcher/worker.py и ADR 0002.
 

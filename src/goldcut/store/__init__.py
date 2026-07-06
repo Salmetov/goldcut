@@ -152,6 +152,18 @@ class Store:
             (video_id, url, title, duration_s, transcript_source),
         )
 
+    # ── подписка ──────────────────────────────────────────────────
+    def activate_subscription(self, user_id: int, charge_id: str | None, expires_at) -> None:
+        """Перевести юзера на paid + записать подписку (после successful_payment)."""
+        self._exec("UPDATE users SET plan='paid' WHERE id=%s", (user_id,))
+        self._exec(
+            "INSERT INTO subscriptions(user_id, provider, status, started_at, expires_at, "
+            "telegram_charge_id) VALUES(%s,'telegram_stars','active', now(), %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET status='active', started_at=now(), "
+            "expires_at=EXCLUDED.expires_at, telegram_charge_id=EXCLUDED.telegram_charge_id",
+            (user_id, expires_at, charge_id),
+        )
+
     # ── сессии (стейт диалога) ────────────────────────────────────
     def get_session(self, chat_id: int) -> dict:
         r = self._exec("SELECT state, current_video_id FROM sessions WHERE chat_id=%s",

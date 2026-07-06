@@ -26,6 +26,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    PreCheckoutQueryHandler,
     filters,
 )
 
@@ -220,6 +221,25 @@ async def on_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await q.message.reply_text("Готово ✅" + tail)
 
 
+# ────────────────────────── платежи (Stars) ──────────────────────────
+async def on_pre_checkout(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Подтвердить платёж (обязательно в течение 10с, иначе Telegram отменит)."""
+    await update.pre_checkout_query.answer(ok=True)
+
+
+async def on_successful_payment(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
+    """Оплата прошла → активируем подписку (paid)."""
+    sp = update.message.successful_payment
+    u = update.effective_user
+    STORE.get_or_create_user(u.id, u.username, u.language_code)
+    STORE.activate_subscription(
+        u.id, sp.telegram_payment_charge_id,
+        getattr(sp, "subscription_expiration_date", None),
+    )
+    log.info("subscription activated for %s (charge %s)", u.id, sp.telegram_payment_charge_id)
+    await update.message.reply_text("✅ Подписка активна! Теперь вырезки без лимита. Спасибо 🙌")
+
+
 def main() -> None:
     if not CFG.telegram_bot_token:
         raise SystemExit("TELEGRAM_BOT_TOKEN не задан")
@@ -232,6 +252,8 @@ def main() -> None:
         .media_write_timeout(600).pool_timeout(10).build()
     )
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(PreCheckoutQueryHandler(on_pre_checkout))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, on_successful_payment))
     app.add_handler(MessageHandler(filters.Regex(YOUTUBE_RE), on_url))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
