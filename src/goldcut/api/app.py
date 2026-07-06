@@ -12,10 +12,12 @@ bot-токену (api/auth.py). Никаких кук/паролей.
 from __future__ import annotations
 
 import logging
+import os
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from goldcut import billing
@@ -109,3 +111,9 @@ def subscribe(acc: Account = Depends(current_account)) -> dict:
         log.error("createInvoiceLink failed: %s", data)
         raise HTTPException(502, f"telegram: {data.get('description')}")
     return {"invoice_url": data["result"], "price_xtr": CFG.sub_price_xtr}
+
+
+# Статика mini-app (монтируется ПОСЛЕ /api-роутов — они имеют приоритет).
+_WEBAPP_DIST = "/root/goldcut-dev/webapp/dist"
+if os.path.isdir(_WEBAPP_DIST):
+    app.mount("/", StaticFiles(directory=_WEBAPP_DIST, html=True), name="webapp")
