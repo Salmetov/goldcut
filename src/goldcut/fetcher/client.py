@@ -26,8 +26,10 @@ class TailscaleFetcher:
         self.base_url = base_url.rstrip("/")
         self.cache_dir = Path(cache_dir)
 
+    # Fetcher ходит ТОЛЬКО в tailnet (на Mac) — прокси из окружения тут вреден
+    # (перехватывает запрос и отдаёт 405). trust_env=False = всегда напрямую.
     def health(self) -> dict:
-        with httpx.Client(timeout=10) as c:
+        with httpx.Client(timeout=10, trust_env=False) as c:
             return c.get(f"{self.base_url}/health").json()
 
     def meta(self, url: str, sub_langs: str = "en.*", *, force: bool = False) -> VideoMeta:
@@ -47,7 +49,7 @@ class TailscaleFetcher:
         return meta
 
     def _meta_fetch(self, url: str, sub_langs: str) -> VideoMeta:
-        with httpx.Client(timeout=300) as c:
+        with httpx.Client(timeout=300, trust_env=False) as c:
             r = c.post(f"{self.base_url}/meta", json={"url": url, "sub_langs": sub_langs})
             r.raise_for_status()
             data = r.json()
@@ -68,7 +70,7 @@ class TailscaleFetcher:
     def fetch_video(self, url: str) -> Path:
         """Стадия B: полный mp4 через кэш Mac → локальный кэш сервера."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        with httpx.Client(timeout=1800) as c:
+        with httpx.Client(timeout=1800, trust_env=False) as c:
             r = c.post(f"{self.base_url}/download", json={"url": url})
             r.raise_for_status()
             info = r.json()
