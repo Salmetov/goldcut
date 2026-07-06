@@ -7,8 +7,8 @@ import { openInvoice } from "./telegram";
 
 const ASPECTS = ["original", "9:16", "1:1", "4:5", "16:9"];
 const MODES = [
-  { v: "trim", label: "Как есть" },
-  { v: "short", label: "Шортс 9:16" },
+  { v: "trim", label: "Оригинал" },
+  { v: "short", label: "Вертикальный 9:16" },
 ];
 
 function mmss(s: number | null): string {
@@ -73,6 +73,11 @@ export default function App() {
             <button key={m.v} className={settings.mode === m.v ? "on" : ""}
               onClick={() => update({ default_mode: m.v })}>{m.label}</button>
           ))}
+        </div>
+        <div className="hint">
+          {settings.mode === "short"
+            ? "Вертикальный 9:16 с фоном — готовый клип для TikTok/Reels."
+            : "Честный кусок в исходном формате видео (по умолчанию). Быстро."}
         </div>
         <div className="label">Соотношение сторон</div>
         <div className="seg wrap-seg">

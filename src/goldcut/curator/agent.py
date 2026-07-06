@@ -172,10 +172,7 @@ async def _exec_cut_range(inp: dict, ctx: "Ctx") -> str:
     if end_s - start_s > 600:
         return "Слишком длинный кусок (>10 мин) — Telegram не пропустит. Возьми короче."
     label = f"{mmss(start_s)}–{mmss(end_s)}"
-    # явный таймкод-диапазон → честный trim (быстро на 2-CPU, не тяжёлый 9:16-ре-энкод)
-    prof = RenderProfile(mode="trim", aspect_ratio=ctx.profile.aspect_ratio,
-                         subtitles=ctx.profile.subtitles)
-    return await _cut_and_deliver(ctx, [(label, start_s, end_s, inp.get("title") or label)], prof)
+    return await _cut_and_deliver(ctx, [(label, start_s, end_s, inp.get("title") or label)])
 
 
 def delivery_render(source, c: Candidate, out, profile: RenderProfile, meta: VideoMeta):

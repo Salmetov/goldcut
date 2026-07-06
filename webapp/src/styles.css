@@ -20,6 +20,7 @@ h2 { font-size: 14px; color: var(--hint); text-transform: uppercase; letter-spac
 .card { background: var(--card); border-radius: 14px; padding: 14px 16px; }
 .row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
 .label { color: var(--hint); font-size: 13px; margin: 14px 0 8px; }
+.hint { color: var(--hint); font-size: 12px; line-height: 1.35; margin: 8px 2px 0; }
 .dim { color: var(--hint); }
 .small { font-size: 13px; }
 .center { text-align: center; padding: 8px; }
