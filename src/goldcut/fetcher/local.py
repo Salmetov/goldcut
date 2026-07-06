@@ -29,17 +29,22 @@ _PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PR
 
 
 class LocalFetcher:
+    DEFAULT_DENO = "/root/.deno/bin/deno"
+
     def __init__(
         self,
         cache_dir: str | Path = "cache",
         *,
         ytdlp: str = "yt-dlp",
         deno: str | None = None,
-        extractor_args: str = "youtube:player_client=android,ios,tv",
-        video_format: str = "b[ext=mp4]/b",
+        extractor_args: str = "",
+        video_format: str = "bv*[height<=1080]+ba/b[height<=1080]/b",
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.ytdlp = ytdlp
+        # deno+EJS решает n-challenge → доступны HD (adaptive) форматы через web-клиент
+        if deno is None:
+            deno = self.DEFAULT_DENO if Path(self.DEFAULT_DENO).exists() else None
         self.deno = deno
         self.extractor_args = extractor_args
         self.video_format = video_format
