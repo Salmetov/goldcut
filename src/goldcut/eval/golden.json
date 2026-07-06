@@ -1,0 +1,26 @@
+[
+  {
+    "video_id": "UclrVWafRAI",
+    "url": "https://youtu.be/UclrVWafRAI",
+    "topic": "какие профессии у людей останутся к 2030",
+    "expected_start_s": 773,
+    "expected_end_s": 867,
+    "note": "baseline, verify — кросс-язык RU→EN, момент про jobs in a world of AGI"
+  },
+  {
+    "video_id": "UclrVWafRAI",
+    "url": "https://youtu.be/UclrVWafRAI",
+    "topic": "which jobs will remain in a world of AGI",
+    "expected_start_s": 773,
+    "expected_end_s": 867,
+    "note": "baseline, verify — тот же момент, EN-запрос"
+  },
+  {
+    "video_id": "UclrVWafRAI",
+    "url": "https://youtu.be/UclrVWafRAI",
+    "topic": "когда наступит AGI по прогнозу",
+    "expected_start_s": 602,
+    "expected_end_s": 651,
+    "note": "baseline, verify — прогноз сроков AGI"
+  }
+]
