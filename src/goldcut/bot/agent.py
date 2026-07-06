@@ -139,10 +139,13 @@ async def _run_f2(update: Update, st: dict, user_text: str) -> None:
         await chat.send_action(ChatAction.UPLOAD_VIDEO)
         return await delivery.send_video(update.message, path, cap)
 
+    async def send_status(text):
+        await update.message.reply_text(text)
+
     ctx = curator_agent.Ctx(
         url=st["url"], meta=meta, account=acc, profile=profile, store=STORE,
         fetcher=FETCHER, llm=LLM, cfg=CFG, send_video=send_video,
-        clips_dir=CLIPS, candidates=cands,
+        send_status=send_status, clips_dir=CLIPS, candidates=cands,
     )
     try:
         reply, msgs = await curator_agent.run_turn(user_text, st.get("agent_messages", []), ctx)

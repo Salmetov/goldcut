@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
+from pathlib import Path
 
 from goldcut import billing, curator, delivery
+from goldcut.fetcher import youtube_id
 from goldcut.models import Candidate, RenderProfile, VideoMeta
 from goldcut.transcript import mmss
 
@@ -114,10 +115,17 @@ def _parse_tc(s: str) -> float:
     return float(s)
 
 
-async def _cut_and_deliver(ctx: "Ctx", segments: list) -> str:
+async def _cut_and_deliver(ctx: "Ctx", segments: list, profile=None) -> str:
     """segments: (label, start_s, end_s, title). Гейт квоты → нарезка → доставка → списание."""
+    profile = profile or ctx.profile
     if not billing.check_quota(ctx.store, ctx.account, ctx.cfg).allowed:
         return "GATE: лимит бесплатных вырезок исчерпан. Предложи оформить Premium."
+    # обратная связь: первый рез скачивает полное видео (для длинного ролика ~пара минут)
+    if ctx.send_status:
+        vid = youtube_id(ctx.url)
+        cached = bool(vid) and (Path(ctx.fetcher.cache_dir) / f"{vid}.mp4").exists()
+        await ctx.send_status("✂️ Режу…" if cached
+                              else "✂️ Качаю видео (первый раз ~пара минут) и режу…")
     source = await asyncio.to_thread(ctx.fetcher.fetch_video, ctx.url)
     done, stopped = [], False
     for label, start_s, end_s, title in segments:
@@ -125,15 +133,15 @@ async def _cut_and_deliver(ctx: "Ctx", segments: list) -> str:
             stopped = True
             break
         c = Candidate(start_s=start_s, end_s=end_s, transcript="", title=title, confidence=1.0)
-        out = ctx.clips_dir / f"{source.stem}_{int(start_s)}_{int(end_s)}.mp4"
+        out = ctx.clips_dir / f"{source.stem}_{int(start_s)}_{int(end_s)}_{profile.mode}.mp4"
         try:
-            await asyncio.to_thread(delivery_render, source, c, out, ctx.profile, ctx.meta)
+            await asyncio.to_thread(delivery_render, source, c, out, profile, ctx.meta)
         except Exception as exc:
             log.exception("cut failed")
             done.append(f"{label} ошибка: {exc}")
             continue
         file_id = await ctx.send_video(out, delivery.caption_for(c, ctx.meta))
-        delivery.record_and_charge(ctx.store, ctx.account.id, ctx.url, ctx.meta, c, ctx.profile, file_id)
+        delivery.record_and_charge(ctx.store, ctx.account.id, ctx.url, ctx.meta, c, profile, file_id)
         done.append(f"{label} ✅")
     left = billing.check_quota(ctx.store, ctx.account, ctx.cfg)
     tail = "" if left.limit is None else f" Осталось: {left.remaining}/{left.limit}."
@@ -164,7 +172,10 @@ async def _exec_cut_range(inp: dict, ctx: "Ctx") -> str:
     if end_s - start_s > 600:
         return "Слишком длинный кусок (>10 мин) — Telegram не пропустит. Возьми короче."
     label = f"{mmss(start_s)}–{mmss(end_s)}"
-    return await _cut_and_deliver(ctx, [(label, start_s, end_s, inp.get("title") or label)])
+    # явный таймкод-диапазон → честный trim (быстро на 2-CPU, не тяжёлый 9:16-ре-энкод)
+    prof = RenderProfile(mode="trim", aspect_ratio=ctx.profile.aspect_ratio,
+                         subtitles=ctx.profile.subtitles)
+    return await _cut_and_deliver(ctx, [(label, start_s, end_s, inp.get("title") or label)], prof)
 
 
 def delivery_render(source, c: Candidate, out, profile: RenderProfile, meta: VideoMeta):
@@ -174,7 +185,7 @@ def delivery_render(source, c: Candidate, out, profile: RenderProfile, meta: Vid
 
 class Ctx:
     def __init__(self, *, url, meta, account, profile, store, fetcher, llm, cfg,
-                 send_video, clips_dir, candidates):
+                 send_video, send_status, clips_dir, candidates):
         self.url = url
         self.meta = meta
         self.account = account
@@ -184,6 +195,7 @@ class Ctx:
         self.llm = llm
         self.cfg = cfg
         self.send_video = send_video
+        self.send_status = send_status  # async (text) — промежуточный статус в чат
         self.clips_dir = clips_dir
         self.candidates: list[Candidate] = candidates
 
