@@ -89,8 +89,8 @@ async def on_url(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         log.exception("meta failed")
         if "субтитры" in str(exc).lower():
             await update.message.reply_text(
-                "У этого ролика нет субтитров (en/ru) — пока поддерживаю только видео с "
-                "автосубтитрами. Пришли другую ссылку."
+                "У этого ролика нет автосубтитров — пока поддерживаю только видео с ними. "
+                "Пришли другую ссылку."
             )
         else:
             await update.message.reply_text(f"❌ Не смог получить видео: {exc}")

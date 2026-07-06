@@ -74,10 +74,16 @@ class LocalFetcher:
         return {"ok": p.returncode == 0, "ytdlp": p.stdout.strip()[:20], "backend": "local"}
 
     def _original_lang(self, url: str) -> str:
-        """Язык оригинала ролика (yt-dlp %(language)s). Пусто → 'en'."""
+        """Базовый код языка оригинала (yt-dlp %(language)s). Пусто → 'en'.
+
+        Обрезаем регион: %(language)s даёт 'en-US', а дорожки авто-сабов именуются
+        базовым кодом ('en', 'en-orig'). Без обрезки sub_langs не совпадал → «нет
+        субтитров» на роликах, где они на самом деле есть.
+        """
         p = self._run(["--skip-download", "--print", "%(language)s", url], 120)
         lang = (p.stdout.strip().splitlines() or [""])[-1].strip()
-        return lang if lang and lang != "NA" else "en"
+        lang = lang if lang and lang != "NA" else "en"
+        return lang.split("-")[0]
 
     # ── стадия A: оригинальный авто-кэпшн + heatmap (текст) ──
     def meta(self, url: str, *, force: bool = False) -> VideoMeta:
