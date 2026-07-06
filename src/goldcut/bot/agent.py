@@ -32,7 +32,7 @@ from telegram.ext import (
 from goldcut import accounts, billing, delivery, nlu
 from goldcut.config import Config
 from goldcut.cutter import render
-from goldcut.fetcher.client import TailscaleFetcher
+from goldcut.fetcher.local import LocalFetcher
 from goldcut.models import Candidate
 from goldcut.retrieval import locate
 from goldcut.store import Store
@@ -43,8 +43,9 @@ log = logging.getLogger("goldcut.agent")
 
 CFG = Config.from_env("/root/goldcut-dev/.env")
 STORE = Store(CFG.database_url)
-FETCHER = TailscaleFetcher(
-    CFG.fetcher_base_url, cache_dir="/root/goldcut-dev/cache", sub_langs=CFG.sub_langs
+FETCHER = LocalFetcher(
+    cache_dir="/root/goldcut-dev/cache", sub_langs=CFG.sub_langs,
+    ytdlp="/root/goldcut-dev/.venv/bin/yt-dlp",
 )
 LLM = anthropic.Anthropic(api_key=CFG.anthropic_api_key)
 CLIPS = Path("/root/goldcut-dev/clips")
