@@ -1,0 +1,38 @@
+:root {
+  --bg: var(--tg-theme-bg-color, #17212b);
+  --card: var(--tg-theme-secondary-bg-color, #232e3c);
+  --text: var(--tg-theme-text-color, #fff);
+  --hint: var(--tg-theme-hint-color, #7d8b99);
+  --accent: var(--tg-theme-button-color, #3390ec);
+  --accent-text: var(--tg-theme-button-text-color, #fff);
+}
+:root[data-theme="light"] {
+  --bg: var(--tg-theme-bg-color, #fff);
+  --card: var(--tg-theme-secondary-bg-color, #f1f1f1);
+  --text: var(--tg-theme-text-color, #000);
+  --hint: var(--tg-theme-hint-color, #999);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, sans-serif; }
+.wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 22px; margin: 8px 0 16px; }
+h2 { font-size: 14px; color: var(--hint); text-transform: uppercase; letter-spacing: .04em; margin: 20px 0 8px; }
+.card { background: var(--card); border-radius: 14px; padding: 14px 16px; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+.label { color: var(--hint); font-size: 13px; margin: 14px 0 8px; }
+.dim { color: var(--hint); }
+.small { font-size: 13px; }
+.center { text-align: center; padding: 8px; }
+.err { color: #e05a5a; }
+.btn { width: 100%; border: 0; border-radius: 12px; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+.btn.primary { background: var(--accent); color: var(--accent-text); }
+.btn:disabled { opacity: .6; }
+.seg { display: flex; gap: 6px; }
+.seg.wrap-seg { flex-wrap: wrap; }
+.seg button { flex: 1; min-width: 56px; background: transparent; color: var(--text); border: 1px solid var(--hint); border-radius: 10px; padding: 9px 6px; font-size: 14px; cursor: pointer; }
+.seg button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.toggle { cursor: pointer; }
+.toggle input { width: 42px; height: 24px; }
+.clip { padding: 10px 0; border-bottom: 1px solid rgba(125,139,153,.2); }
+.clip:last-child { border-bottom: 0; }
+.clip-title { font-weight: 500; margin-bottom: 2px; }
