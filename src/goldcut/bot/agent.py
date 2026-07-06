@@ -1,11 +1,12 @@
-"""goldcut — разговорный агент (Phase 1, Feature 1: точечная выемка по запросу).
+"""goldcut — разговорный агент (F1 точечная выемка + F2 разговорная курация).
 
-Флоу:
-  1. ссылка на YouTube → fetcher.meta → «ролик загружен, что вырезать?»
-  2. свободный запрос («дай кусок на 12 минуте про X») → nlu → retrieval.locate
-     → превью (текст+таймкод) + кнопки [✂️ Режь] [⬅️ Раньше] [➡️ Позже] [✖️]
-  3. [Режь] → квота-гейт → fetch_video → cutter.render(профиль) → доставка + запись
-Стейт сессии — в Postgres (store.sessions), переживает рестарт бота.
+Роутинг по nlu:
+  F1 (locate) «дай кусок на 12 минуте про X» → retrieval.locate → превью с
+     кнопками [✂️ Режь] [⬅️ Раньше] [➡️ Позже] [✖️] → квота-гейт → нарезка.
+  F2 (curate) «найди куски, где …» → curator.agent (Claude с инструментами
+     find_moments/cut_and_send) ведёт диалог; режет по согласию, квота в коде.
+Ссылка на YouTube → fetcher.meta. Стейт сессии (в т.ч. история F2-диалога) — в
+Postgres (store.sessions), переживает рестарт бота.
 
 Запуск: python -m goldcut.bot.agent   (нужен TELEGRAM_BOT_TOKEN, DATABASE_URL в .env)
 """
@@ -32,9 +33,10 @@ from telegram.ext import (
 
 from goldcut import accounts, billing, delivery, nlu
 from goldcut.config import Config
+from goldcut.curator import agent as curator_agent
 from goldcut.cutter import render
 from goldcut.fetcher.local import LocalFetcher
-from goldcut.models import Candidate
+from goldcut.models import Candidate, Request
 from goldcut.retrieval import locate
 from goldcut.store import Store
 from goldcut.transcript import mmss
@@ -121,6 +123,40 @@ def _preview(cand: Candidate) -> tuple[str, InlineKeyboardMarkup]:
     return text, kb
 
 
+async def _run_f2(update: Update, st: dict, user_text: str) -> None:
+    """Ход разговорного F2-агента (курация): продолжает диалог, режет по согласию."""
+    chat, u = update.effective_chat, update.effective_user
+    acc = STORE.get_or_create_user(u.id, u.username, u.language_code)
+    profile = accounts.resolve_profile(acc, Request(mode="curate"))
+    try:
+        meta = await asyncio.to_thread(FETCHER.meta, st["url"])
+    except Exception as exc:
+        await update.message.reply_text(f"❌ {exc}")
+        return
+    cands = [Candidate(**c) for c in st.get("candidates", [])]
+
+    async def send_video(path, cap):
+        await chat.send_action(ChatAction.UPLOAD_VIDEO)
+        return await delivery.send_video(update.message, path, cap)
+
+    ctx = curator_agent.Ctx(
+        url=st["url"], meta=meta, account=acc, profile=profile, store=STORE,
+        fetcher=FETCHER, llm=LLM, cfg=CFG, send_video=send_video,
+        clips_dir=CLIPS, candidates=cands,
+    )
+    try:
+        reply, msgs = await curator_agent.run_turn(user_text, st.get("agent_messages", []), ctx)
+    except Exception as exc:
+        log.exception("f2 agent failed")
+        await update.message.reply_text(f"❌ Ошибка агента: {exc}")
+        return
+    st["agent_messages"] = msgs
+    st["candidates"] = [c.model_dump() for c in ctx.candidates]
+    _save(chat.id, u.id, st)
+    if reply:
+        await update.message.reply_text(reply)
+
+
 async def on_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     chat, u = update.effective_chat, update.effective_user
     st = _load(chat.id)
@@ -128,13 +164,24 @@ async def on_text(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Сначала пришли ссылку на YouTube-видео.")
         return
     await chat.send_action(ChatAction.TYPING)
+
+    # активный разговор с F2-агентом → продолжаем в нём
+    if st.get("mode") == "f2":
+        await _run_f2(update, st, update.message.text)
+        return
+
     req = await asyncio.to_thread(nlu.parse, update.message.text, client=LLM, cfg=CFG)
 
     if req.mode == "curate":
-        await update.message.reply_text("Подборку лучших кусков (F2) добавлю позже. Пока умею точечно — назови момент.")
+        st["mode"] = "f2"
+        _save(chat.id, u.id, st)
+        await _run_f2(update, st, update.message.text)
         return
     if req.mode == "other":
-        await update.message.reply_text("Назови момент: время и/или тему. Напр. «на 15 минуте про безопасность».")
+        await update.message.reply_text(
+            "Назови момент: время и/или тему («на 15 минуте про безопасность»), "
+            "либо «найди куски, где …» — соберу подборку."
+        )
         return
 
     try:
