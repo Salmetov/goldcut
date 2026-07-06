@@ -80,7 +80,7 @@ async def on_url(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
     url = YOUTUBE_RE.search(update.message.text).group(0)
     chat, u = update.effective_chat, update.effective_user
     STORE.get_or_create_user(u.id, u.username, u.language_code)
-    await update.message.reply_text("🔍 Забираю транскрипт через Mac…")
+    await update.message.reply_text("🔍 Забираю транскрипт…")
     await chat.send_action(ChatAction.TYPING)
     try:
         meta = await asyncio.to_thread(FETCHER.meta, url)
@@ -191,7 +191,7 @@ async def on_button(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         if not quota.allowed:
             await q.edit_message_text(f"⛔ {BILLING_PROVIDER.upgrade_prompt()}")
             return
-        await q.edit_message_text("✂️ Режу: качаю видео через Mac и монтирую…")
+        await q.edit_message_text("✂️ Режу: качаю видео и монтирую (может занять минуту)…")
         try:
             meta = await asyncio.to_thread(FETCHER.meta, st["url"])
             source = await asyncio.to_thread(FETCHER.fetch_video, st["url"])
