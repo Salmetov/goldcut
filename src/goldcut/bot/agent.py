@@ -43,7 +43,9 @@ log = logging.getLogger("goldcut.agent")
 
 CFG = Config.from_env("/root/goldcut-dev/.env")
 STORE = Store(CFG.database_url)
-FETCHER = TailscaleFetcher(CFG.fetcher_base_url, cache_dir="/root/goldcut-dev/cache")
+FETCHER = TailscaleFetcher(
+    CFG.fetcher_base_url, cache_dir="/root/goldcut-dev/cache", sub_langs=CFG.sub_langs
+)
 LLM = anthropic.Anthropic(api_key=CFG.anthropic_api_key)
 CLIPS = Path("/root/goldcut-dev/clips")
 YOUTUBE_RE = re.compile(r"(https?://)?(www\.)?(youtube\.com/(watch|shorts)|youtu\.be/)\S+")
@@ -84,7 +86,13 @@ async def on_url(update: Update, _: ContextTypes.DEFAULT_TYPE) -> None:
         meta = await asyncio.to_thread(FETCHER.meta, url)
     except Exception as exc:
         log.exception("meta failed")
-        await update.message.reply_text(f"❌ Не смог получить видео: {exc}")
+        if "субтитры" in str(exc).lower():
+            await update.message.reply_text(
+                "У этого ролика нет субтитров (en/ru) — пока поддерживаю только видео с "
+                "автосубтитрами. Пришли другую ссылку."
+            )
+        else:
+            await update.message.reply_text(f"❌ Не смог получить видео: {exc}")
         return
     from goldcut.fetcher import youtube_id
     vid = youtube_id(url)

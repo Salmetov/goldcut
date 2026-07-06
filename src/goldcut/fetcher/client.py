@@ -22,9 +22,12 @@ from goldcut.transcript import parse_vtt_text, parse_vtt_words_text
 class TailscaleFetcher:
     """Fetcher поверх HTTP-воркера на Mac, доступного только в tailnet."""
 
-    def __init__(self, base_url: str, cache_dir: str | Path = "cache") -> None:
+    def __init__(
+        self, base_url: str, cache_dir: str | Path = "cache", sub_langs: str = "en.*,ru.*"
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.cache_dir = Path(cache_dir)
+        self.sub_langs = sub_langs
 
     # Fetcher ходит ТОЛЬКО в tailnet (на Mac) — прокси из окружения тут вреден
     # (перехватывает запрос и отдаёт 405). trust_env=False = всегда напрямую.
@@ -32,7 +35,7 @@ class TailscaleFetcher:
         with httpx.Client(timeout=10, trust_env=False) as c:
             return c.get(f"{self.base_url}/health").json()
 
-    def meta(self, url: str, sub_langs: str = "en.*", *, force: bool = False) -> VideoMeta:
+    def meta(self, url: str, sub_langs: str | None = None, *, force: bool = False) -> VideoMeta:
         """Стадия A: субтитры + heatmap (килобайты). Видео не скачивается.
 
         Результат кэшируется на диске по video_id: субтитры готового ролика не
@@ -42,7 +45,7 @@ class TailscaleFetcher:
         cache = self.cache_dir / f"{vid}.meta.json" if vid else None
         if cache and cache.exists() and not force:
             return VideoMeta.model_validate_json(cache.read_text(encoding="utf-8"))
-        meta = self._meta_fetch(url, sub_langs)
+        meta = self._meta_fetch(url, sub_langs or self.sub_langs)
         if cache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             cache.write_text(meta.model_dump_json(), encoding="utf-8")

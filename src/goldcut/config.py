@@ -38,7 +38,11 @@ class Config:
     # Store (Postgres goldcut / goldcut_dev)
     database_url: str | None = None
 
-    # ASR-фолбэк (когда YouTube-сабов нет / другой язык)
+    # Языки субтитров для запроса к YouTube (yt-dlp --sub-langs).
+    # en+ru покрывает целевую аудиторию на бесплатных авто-сабах.
+    sub_langs: str = "en.*,ru.*"
+
+    # ASR-фолбэк (пока не в Phase 1; включим для роликов без авто-сабов)
     soniox_api_key: str | None = None
     soniox_api_base: str = "https://api.soniox.com/v1"
 
@@ -59,6 +63,7 @@ class Config:
             ),
             top_k=int(os.environ.get("GOLDCUT_TOP_K", "10")),
             database_url=os.environ.get("DATABASE_URL"),
+            sub_langs=os.environ.get("GOLDCUT_SUB_LANGS", "en.*,ru.*"),
             soniox_api_key=os.environ.get("SONIOX_API_KEY"),
             soniox_api_base=os.environ.get("SONIOX_API_BASE", "https://api.soniox.com/v1"),
             trial_quota=int(os.environ.get("GOLDCUT_TRIAL_QUOTA", "5")),
