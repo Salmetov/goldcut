@@ -59,3 +59,66 @@ class VideoMeta(BaseModel):
     transcript: str                                # с таймкодами [MM:SS]
     heatmap: list[tuple[float, float]] = []        # (sec, intensity 0..1)
     word_timings: list[tuple[float, str]] = []     # (sec, слово) — для привязки таймкодов
+
+
+# ─────────────────────────── Продукт (Phase 1) ───────────────────────────
+
+class RenderProfile(BaseModel):
+    """Как рендерить итоговый клип. Резолвится из настроек юзера + оверрайд из чата."""
+
+    mode: str = "trim"              # trim (faithful) | short (9:16 + сабы)
+    aspect_ratio: str = "original"  # original | 9:16 | 1:1 | 4:5 | 16:9
+    subtitles: bool = False
+
+
+class Account(BaseModel):
+    """Пользователь-аккаунт (по Telegram user_id) + его настройки."""
+
+    id: int
+    username: str | None = None
+    locale: str | None = None
+    plan: str = "trial"             # trial | paid
+    settings: RenderProfile = RenderProfile()
+
+
+class Request(BaseModel):
+    """Разобранная реплика пользователя (результат nlu.parse)."""
+
+    mode: str                       # locate (F1) | curate (F2) | other
+    url: str | None = None
+    time_anchor_s: float | None = None   # «12-я минута» → 720.0 (мягкий приор)
+    topic: str | None = None             # тема/о чём кусок
+    length_pref_s: float | None = None   # желаемая длительность, если названа
+    format_override: RenderProfile | None = None  # «сделай вертикально/с сабами»
+    raw: str = ""                        # исходный текст (для логов/дебага)
+
+
+class Candidate(BaseModel):
+    """Локализованный фрагмент-кандидат (результат retrieval.locate)."""
+
+    start_s: float
+    end_s: float
+    transcript: str                 # дословный текст диапазона
+    title: str = ""
+    confidence: float = 0.0         # 0..1 — уверенность локализатора
+
+    @property
+    def duration_s(self) -> float:
+        return self.end_s - self.start_s
+
+
+class Delivery(BaseModel):
+    """Запись о доставленной вырезке (история/пруф услуги)."""
+
+    id: int | None = None
+    user_id: int
+    source_url: str
+    video_id: str | None = None
+    title: str | None = None
+    start_s: float | None = None
+    end_s: float | None = None
+    mode: str | None = None
+    aspect_ratio: str | None = None
+    subtitles: bool | None = None
+    tg_file_id: str | None = None
+    duration_s: float | None = None

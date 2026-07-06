@@ -35,6 +35,17 @@ class Config:
     # Сколько кусков предлагать по умолчанию
     top_k: int = 10
 
+    # Store (Postgres goldcut / goldcut_dev)
+    database_url: str | None = None
+
+    # ASR-фолбэк (когда YouTube-сабов нет / другой язык)
+    soniox_api_key: str | None = None
+    soniox_api_base: str = "https://api.soniox.com/v1"
+
+    # Квота триала: N доставленных вырезок за скользящее окно (дней)
+    trial_quota: int = 5
+    trial_window_days: int = 7
+
     @classmethod
     def from_env(cls, dotenv: str | Path | None = ".env") -> "Config":
         if dotenv:
@@ -47,4 +58,9 @@ class Config:
                 "GOLDCUT_FETCHER_URL", "http://macbook-air-muzaffar:8765"
             ),
             top_k=int(os.environ.get("GOLDCUT_TOP_K", "10")),
+            database_url=os.environ.get("DATABASE_URL"),
+            soniox_api_key=os.environ.get("SONIOX_API_KEY"),
+            soniox_api_base=os.environ.get("SONIOX_API_BASE", "https://api.soniox.com/v1"),
+            trial_quota=int(os.environ.get("GOLDCUT_TRIAL_QUOTA", "5")),
+            trial_window_days=int(os.environ.get("GOLDCUT_TRIAL_WINDOW_DAYS", "7")),
         )
