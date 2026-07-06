@@ -44,8 +44,7 @@ log = logging.getLogger("goldcut.agent")
 CFG = Config.from_env("/root/goldcut-dev/.env")
 STORE = Store(CFG.database_url)
 FETCHER = LocalFetcher(
-    cache_dir="/root/goldcut-dev/cache", sub_langs=CFG.sub_langs,
-    ytdlp="/root/goldcut-dev/.venv/bin/yt-dlp",
+    cache_dir="/root/goldcut-dev/cache", ytdlp="/root/goldcut-dev/.venv/bin/yt-dlp"
 )
 LLM = anthropic.Anthropic(api_key=CFG.anthropic_api_key)
 CLIPS = Path("/root/goldcut-dev/clips")

@@ -32,7 +32,6 @@ class LocalFetcher:
     def __init__(
         self,
         cache_dir: str | Path = "cache",
-        sub_langs: str = "en-orig,en,ru-orig,ru",
         *,
         ytdlp: str = "yt-dlp",
         deno: str | None = None,
@@ -40,7 +39,6 @@ class LocalFetcher:
         video_format: str = "b[ext=mp4]/b",
     ) -> None:
         self.cache_dir = Path(cache_dir)
-        self.sub_langs = sub_langs
         self.ytdlp = ytdlp
         self.deno = deno
         self.extractor_args = extractor_args
@@ -70,18 +68,25 @@ class LocalFetcher:
         p = self._run(["--version"], 20)
         return {"ok": p.returncode == 0, "ytdlp": p.stdout.strip()[:20], "backend": "local"}
 
-    # ── стадия A: субтитры + heatmap (текст) ──
-    def meta(self, url: str, sub_langs: str | None = None, *, force: bool = False) -> VideoMeta:
+    def _original_lang(self, url: str) -> str:
+        """Язык оригинала ролика (yt-dlp %(language)s). Пусто → 'en'."""
+        p = self._run(["--skip-download", "--print", "%(language)s", url], 120)
+        lang = (p.stdout.strip().splitlines() or [""])[-1].strip()
+        return lang if lang and lang != "NA" else "en"
+
+    # ── стадия A: оригинальный авто-кэпшн + heatmap (текст) ──
+    def meta(self, url: str, *, force: bool = False) -> VideoMeta:
         vid = youtube_id(url)
         cache = self.cache_dir / f"{vid}.meta.json" if vid else None
         if cache and cache.exists() and not force:
             return VideoMeta.model_validate_json(cache.read_text(encoding="utf-8"))
 
+        lang = self._original_lang(url)
         with tempfile.TemporaryDirectory() as td:
             p = self._run(
                 [
-                    "--skip-download", "--write-auto-sub", "--write-sub",
-                    "--sub-langs", sub_langs or self.sub_langs, "--sub-format", "vtt",
+                    "--skip-download", "--write-auto-sub",
+                    "--sub-langs", f"{lang}-orig,{lang}", "--sub-format", "vtt",
                     "--write-info-json", "-o", os.path.join(td, "vid.%(ext)s"), url,
                 ],
                 300,
@@ -90,8 +95,8 @@ class LocalFetcher:
             if not info_files:
                 raise RuntimeError(f"yt-dlp meta failed: {p.stderr[-800:]}")
             info = json.loads(Path(info_files[0]).read_text(encoding="utf-8"))
-            # предпочитаем не-orig дорожку (как воркер) — проверенное поведение
-            vtts = sorted(glob.glob(os.path.join(td, "*.vtt")), key=lambda x: "orig" in x)
+            # оригинальный авто-кэпшн: предпочитаем -orig, иначе единственный
+            vtts = sorted(glob.glob(os.path.join(td, "*.vtt")), key=lambda x: "orig" not in x)
             vtt = Path(vtts[0]).read_text(encoding="utf-8") if vtts else ""
 
         if not vtt:
