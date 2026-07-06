@@ -50,6 +50,9 @@ class Config:
     trial_quota: int = 5
     trial_window_days: int = 7
 
+    # Подписка (Telegram Stars): цена в XTR за месяц
+    sub_price_xtr: int = 150
+
     @classmethod
     def from_env(cls, dotenv: str | Path | None = ".env") -> "Config":
         if dotenv:
@@ -68,4 +71,5 @@ class Config:
             soniox_api_base=os.environ.get("SONIOX_API_BASE", "https://api.soniox.com/v1"),
             trial_quota=int(os.environ.get("GOLDCUT_TRIAL_QUOTA", "5")),
             trial_window_days=int(os.environ.get("GOLDCUT_TRIAL_WINDOW_DAYS", "7")),
+            sub_price_xtr=int(os.environ.get("GOLDCUT_SUB_PRICE_XTR", "150")),
         )

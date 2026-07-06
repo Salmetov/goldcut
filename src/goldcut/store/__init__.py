@@ -134,6 +134,7 @@ class Store:
                 video_id=r["video_id"], title=r["title"], start_s=r["start_s"],
                 end_s=r["end_s"], mode=r["mode"], aspect_ratio=r["aspect_ratio"],
                 subtitles=r["subtitles"], tg_file_id=r["tg_file_id"], duration_s=r["duration_s"],
+                created_at=r["created_at"].isoformat() if r.get("created_at") else None,
             )
             for r in rows
         ]

@@ -122,3 +122,4 @@ class Delivery(BaseModel):
     subtitles: bool | None = None
     tg_file_id: str | None = None
     duration_s: float | None = None
+    created_at: str | None = None
