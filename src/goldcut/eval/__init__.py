@@ -23,6 +23,7 @@ from goldcut.retrieval import locate
 from goldcut.transcript import mmss
 
 GOLDEN = Path(__file__).parent / "golden.json"
+BASE = Path(__file__).resolve().parents[3]  # goldcut или goldcut-dev
 
 
 def iou(s1: float, e1: float, s2: float, e2: float) -> float:
@@ -41,13 +42,13 @@ def _load_meta(video_id: str, cache_dir: Path) -> VideoMeta | None:
 
 def run(
     golden_path: Path = GOLDEN,
-    cache_dir: str | Path = "/root/goldcut-dev/cache",
+    cache_dir: str | Path | None = None,
     *,
     hit_threshold: float = 0.5,
     cfg: Config | None = None,
 ) -> dict:
-    cfg = cfg or Config.from_env("/root/goldcut-dev/.env")
-    cache_dir = Path(cache_dir)
+    cfg = cfg or Config.from_env(str(BASE / ".env"))
+    cache_dir = Path(cache_dir or BASE / "cache")
     cases = json.loads(Path(golden_path).read_text(encoding="utf-8"))
     rows, skipped = [], []
     for c in cases:

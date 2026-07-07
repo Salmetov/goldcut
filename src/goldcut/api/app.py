@@ -20,6 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from pathlib import Path
+
 from goldcut import billing
 from goldcut.api.auth import InitDataError, validate_init_data
 from goldcut.config import Config
@@ -28,7 +30,8 @@ from goldcut.store import Store
 
 log = logging.getLogger("goldcut.api")
 
-CFG = Config.from_env("/root/goldcut-dev/.env")
+BASE = Path(__file__).resolve().parents[3]  # goldcut или goldcut-dev
+CFG = Config.from_env(str(BASE / ".env"))
 STORE = Store(CFG.database_url)
 
 app = FastAPI(title="goldcut API")
@@ -114,6 +117,6 @@ def subscribe(acc: Account = Depends(current_account)) -> dict:
 
 
 # Статика mini-app (монтируется ПОСЛЕ /api-роутов — они имеют приоритет).
-_WEBAPP_DIST = "/root/goldcut-dev/webapp/dist"
+_WEBAPP_DIST = str(BASE / "webapp" / "dist")
 if os.path.isdir(_WEBAPP_DIST):
     app.mount("/", StaticFiles(directory=_WEBAPP_DIST, html=True), name="webapp")

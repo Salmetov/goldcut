@@ -43,13 +43,15 @@ from goldcut.transcript import mmss
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("goldcut.agent")
 
-CFG = Config.from_env("/root/goldcut-dev/.env")
+# Корень установки (goldcut или goldcut-dev) — из расположения файла, НЕ хардкод.
+BASE = Path(__file__).resolve().parents[3]
+CFG = Config.from_env(str(BASE / ".env"))
 STORE = Store(CFG.database_url)
 FETCHER = LocalFetcher(
-    cache_dir="/root/goldcut-dev/cache", ytdlp="/root/goldcut-dev/.venv/bin/yt-dlp"
+    cache_dir=str(BASE / "cache"), ytdlp=str(BASE / ".venv/bin/yt-dlp")
 )
 LLM = anthropic_client(CFG)
-CLIPS = Path("/root/goldcut-dev/clips")
+CLIPS = BASE / "clips"
 YOUTUBE_RE = re.compile(r"(https?://)?(www\.)?(youtube\.com/(watch|shorts)|youtu\.be/)\S+")
 NUDGE_S = 15.0
 TG_SIZE_LIMIT = 49 * 1024 * 1024
