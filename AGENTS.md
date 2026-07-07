@@ -38,7 +38,8 @@ systemctl restart goldcut-api-dev      # API (mini-app), если менял api
 ./.venv/bin/ruff check src/
 ```
 
-Dev-бот: **@goldcut_dev_bot**. Mini-app: **https://goldcut.salmetov.fun** (кнопка «Аккаунт»).
+Dev-бот: **@goldcut_dev_bot**, mini-app **https://gcd.salmetov.fun**. Прод-бот:
+**@goldcut_bot**, mini-app **https://gc.salmetov.fun** (кнопка «Аккаунт»).
 
 ## Архитектура (модули, `src/goldcut/`)
 
@@ -94,10 +95,13 @@ webapp/          React+Vite mini-app (TS). Сейчас: статус/квота
   нужен PAT). См. [[infra_dev_prod]] в моей памяти.
 - **БД:** Postgres, dev-база `goldcut_dev`, роль `goldcut_app`. Схема — `schema.sql`.
 - **systemd (dev):** `goldcut-bot-dev` (bot.agent, polling), `goldcut-api-dev` (uvicorn :18090).
-- **Caddy:** `goldcut.salmetov.fun` → `reverse_proxy :18090` (API отдаёт и /api, и статику).
-  **TLS через acme.sh DNS-01 (Spaceship)**, НЕ Caddy-ACME — HTTP-01 не проходит из-за
-  алматинского inbound-флапа. Серт: `/etc/caddy/certs/goldcut.{crt,key}`, renewal с reloadcmd.
-  При выпуске нужен `SPACESHIP_ROOT_DOMAIN=salmetov.fun` (авто-детект зоны в хуке ломается).
+- **Caddy:** `gc.salmetov.fun`→`:18091` (ПРОД), `gcd.salmetov.fun`→`:18090` (DEV). API отдаёт
+  и /api, и статику webapp (StaticFiles). **TLS через acme.sh DNS-01 (Spaceship)**, НЕ
+  Caddy-ACME — HTTP-01 не проходит из-за алматинского inbound-флапа. Серты:
+  `/etc/caddy/certs/{gc,gcd}.{crt,key}`, renewal с reloadcmd. При выпуске нужен
+  `SPACESHIP_ROOT_DOMAIN=salmetov.fun`. A-записи ставятся через Spaceship API напрямую
+  (PUT `spaceship.dev/api/v1/dns/records/salmetov.fun`, A использует поле `address`).
+  Грабля: хук пишет «Failed to add TXT», но серт выпускается — для renewal хрупко.
 
 ## Грабли (hard-won, НЕ наступать заново)
 
